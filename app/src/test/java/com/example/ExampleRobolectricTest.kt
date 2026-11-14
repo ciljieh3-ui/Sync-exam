@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.BoxBounds
 import com.example.data.OverlayPreferences
+import com.example.service.OverlayService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -22,6 +23,26 @@ class ExampleRobolectricTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
         assertEquals("Prism", appName)
+    }
+
+    @Test
+    fun `bundled overlay html asset exists and defines expected bridge callbacks`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val html = context.assets.open("overlay.html").bufferedReader().use { it.readText() }
+        assertTrue(html.contains("window.AndroidBridge"))
+        assertTrue(html.contains("window.onFrame"))
+        assertTrue(html.contains("window.onBoxChanged"))
+        assertTrue(html.contains("generativelanguage.googleapis.com"))
+        assertTrue(html.contains("gemini-flash-latest"))
+        assertTrue(html.contains("X-goog-api-key"))
+    }
+
+    @Test
+    fun `configured api key ignores blank and placeholder values`() {
+        assertEquals("", OverlayService.resolveConfiguredApiKey(null))
+        assertEquals("", OverlayService.resolveConfiguredApiKey("   "))
+        assertEquals("", OverlayService.resolveConfiguredApiKey("MY_GEMINI_API_KEY"))
+        assertEquals("test-secret-value", OverlayService.resolveConfiguredApiKey("  test-secret-value  "))
     }
 
     @Test

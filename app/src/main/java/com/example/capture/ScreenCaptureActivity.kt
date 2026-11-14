@@ -17,10 +17,13 @@ import com.example.service.OverlayService
 class ScreenCaptureActivity : ComponentActivity() {
 
     private var launched = false
+    private var scanMode: String = OverlayService.SCAN_MODE_CONTINUOUS
 
     private val projectionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            val serviceIntent = Intent(this, OverlayService::class.java)
+            val serviceIntent = Intent(this, OverlayService::class.java).apply {
+                putExtra(OverlayService.EXTRA_SCAN_MODE, scanMode)
+            }
             val data = result.data
             if (result.resultCode == Activity.RESULT_OK && data != null) {
                 serviceIntent.action = OverlayService.ACTION_WATCH_GRANTED
@@ -35,6 +38,9 @@ class ScreenCaptureActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        scanMode = savedInstanceState?.getString(KEY_SCAN_MODE)
+            ?: intent?.getStringExtra(OverlayService.EXTRA_SCAN_MODE)
+            ?: OverlayService.SCAN_MODE_CONTINUOUS
         if (savedInstanceState != null) {
             launched = savedInstanceState.getBoolean(KEY_LAUNCHED, false)
         }
@@ -46,6 +52,7 @@ class ScreenCaptureActivity : ComponentActivity() {
             } catch (e: Exception) {
                 val serviceIntent = Intent(this, OverlayService::class.java).apply {
                     action = OverlayService.ACTION_WATCH_FAILED
+                    putExtra(OverlayService.EXTRA_SCAN_MODE, scanMode)
                     putExtra(
                         OverlayService.EXTRA_ERROR_MESSAGE,
                         e.message ?: "Unable to launch screen capture prompt",
@@ -60,6 +67,7 @@ class ScreenCaptureActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(KEY_LAUNCHED, launched)
+        outState.putString(KEY_SCAN_MODE, scanMode)
     }
 
     private fun finishNoAnim() {
@@ -70,5 +78,6 @@ class ScreenCaptureActivity : ComponentActivity() {
 
     companion object {
         private const val KEY_LAUNCHED = "capture_launched"
+        private const val KEY_SCAN_MODE = "scan_mode"
     }
 }

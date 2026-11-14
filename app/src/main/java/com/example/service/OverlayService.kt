@@ -14,11 +14,8 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.PixelFormat
-import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
@@ -28,6 +25,7 @@ import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -35,7 +33,9 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
-import android.util.Base64
+import android.provider.Settings
+import android.text.InputType
+import android.text.TextUtils
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Gravity
@@ -45,7 +45,9 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
 import android.webkit.ConsoleMessage
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.JsResult
 import android.webkit.WebChromeClient
@@ -53,18 +55,23 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
+import com.example.BuildConfig
 import com.example.MainActivity
 import com.example.R
 import com.example.capture.ScreenCaptureActivity
 import com.example.data.BoxBounds
 import com.example.data.OverlayPreferences
-import java.io.ByteArrayOutputStream
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -86,14 +93,26 @@ class OverlayService : Service() {
     private var panelParams: WindowManager.LayoutParams? = null
     private var webView: WebView? = null
 
+    // Floating Web browser UI inside the Panel
+    private var tabPrismBtn: TextView? = null
+    private var tabWebBtn: TextView? = null
+    private var floatingWebContainer: LinearLayout? = null
+    private var webBrowserView: WebView? = null
+    private var webUrlInput: EditText? = null
+    private var webStatusBanner: TextView? = null
+    private var webProgressBar: ProgressBar? = null
+    private var isWebTabActive = false
+    private var lastScannedQuery: String = ""
+
     private var selectionBoxView: SelectionBoxView? = null
     private var selectionBoxParams: WindowManager.LayoutParams? = null
 
     private var isPanelVisible = false
     private var isSelectionVisible = false
 
-    // Continuous capture state
+    // Continuous capture & single-shot web scan state
     private val isWatching = AtomicBoolean(false)
+    private val pendingSingleScanForWeb = AtomicBoolean(false)
     private var isScreenInteractive = true
     @Volatile private var sensitivityThreshold: Float = OverlayPreferences.DEFAULT_SENSITIVITY
 
@@ -107,17 +126,9 @@ class OverlayService : Service() {
     private var captureW = 0
     private var captureH = 0
 
-    // Reusable buffers for zero-allocation steady-state change detection
+    // Reusable buffer and change detector for zero-allocation steady-state detection
     private var reusableFullBitmap: Bitmap? = null
-    private var smallBitmap: Bitmap? = null
-    private var smallCanvas: Canvas? = null
-    private val smallPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val srcRect = Rect()
-    private val dstSmallRect = Rect(0, 0, DIFF_W, DIFF_H)
-    private val smallPixels = IntArray(DIFF_PIXEL_COUNT)
-    private val currGray = FloatArray(DIFF_PIXEL_COUNT)
-    private val refGray = FloatArray(DIFF_PIXEL_COUNT)
-    private var hasRefFrame = false
+    private val frameChangeDetector = FrameChangeDetector()
     private var lastChangeTimeMs = 0L
 
     private val screenReceiver = object : BroadcastReceiver() {
@@ -177,19 +188,37 @@ class OverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val scanMode = intent?.getStringExtra(EXTRA_SCAN_MODE) ?: SCAN_MODE_CONTINUOUS
         when (intent?.action) {
             ACTION_WATCH_GRANTED -> {
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Int.MIN_VALUE)
                 val resultData = getParcelableIntentCompat(intent, EXTRA_RESULT_DATA)
                 if (resultCode != Int.MIN_VALUE && resultData != null) {
-                    beginContinuousCapture(resultCode, resultData)
+                    if (scanMode == SCAN_MODE_SINGLE_WEB) {
+                        captureSingleFrameForWeb(resultCode, resultData)
+                    } else {
+                        beginContinuousCapture(resultCode, resultData)
+                    }
                 } else {
-                    stopWatchingInternal(notifyJs = true)
+                    if (scanMode == SCAN_MODE_SINGLE_WEB) {
+                        showPanel()
+                        showWebStatus("Izin rekam layar ditolak", isError = true)
+                        evaluateJs("window.onSingleScanCancelled && window.onSingleScanCancelled('Screen capture denied')")
+                    } else {
+                        stopWatchingInternal(notifyJs = true)
+                    }
                 }
             }
 
             ACTION_WATCH_CANCELLED, ACTION_WATCH_FAILED -> {
-                stopWatchingInternal(notifyJs = true)
+                if (scanMode == SCAN_MODE_SINGLE_WEB) {
+                    val err = intent.getStringExtra(EXTRA_ERROR_MESSAGE) ?: "Scan dibatalkan"
+                    showPanel()
+                    showWebStatus(err, isError = true)
+                    evaluateJs("window.onSingleScanCancelled && window.onSingleScanCancelled(${JSONObject.quote(err)})")
+                } else {
+                    stopWatchingInternal(notifyJs = true)
+                }
             }
 
             ACTION_STOP_WATCHING -> {
@@ -254,6 +283,16 @@ class OverlayService : Service() {
             }
         }
         webView = null
+
+        webBrowserView?.let { bwv ->
+            try {
+                bwv.stopLoading()
+                bwv.destroy()
+            } catch (_: Exception) {
+            }
+        }
+        webBrowserView = null
+        floatingWebContainer = null
 
         captureThread?.quitSafely()
         captureThread = null
@@ -646,6 +685,44 @@ class OverlayService : Service() {
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1)),
         )
 
+        // 2-tab switcher: Prism AI | Floating Web
+        val tabBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Color.parseColor("#0D1320"))
+        }
+
+        val prismTab = TextView(this).apply {
+            text = "Prism AI"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            minHeight = dpToPx(36)
+            setOnClickListener { switchPanelTab(webTab = false) }
+        }
+        val webTab = TextView(this).apply {
+            text = "Floating Web"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            minHeight = dpToPx(36)
+            setOnClickListener { switchPanelTab(webTab = true) }
+        }
+        tabBar.addView(prismTab, LinearLayout.LayoutParams(0, dpToPx(36), 1f))
+        tabBar.addView(webTab, LinearLayout.LayoutParams(0, dpToPx(36), 1f))
+        root.addView(
+            tabBar,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(36)),
+        )
+        root.addView(
+            View(this).apply { setBackgroundColor(Color.parseColor("#25314A")) },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1)),
+        )
+
+        tabPrismBtn = prismTab
+        tabWebBtn = webTab
+
+        val contentHost = FrameLayout(this)
+
         val wv = WebView(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
             isFocusable = true
@@ -662,6 +739,29 @@ class OverlayService : Service() {
                     request: WebResourceRequest?,
                 ): Boolean {
                     return false
+                }
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    val configuredKey = resolveConfiguredApiKey(BuildConfig.GEMINI_API_KEY)
+                    if (configuredKey.isNotEmpty()) {
+                        val quotedKey = JSONObject.quote(configuredKey)
+                        view?.evaluateJavascript(
+                            """
+                            (function() {
+                              try {
+                                var raw = localStorage.getItem('prism_v2');
+                                var st = raw ? JSON.parse(raw) : {};
+                                if (!st.apiKey) {
+                                  st.apiKey = $quotedKey;
+                                  localStorage.setItem('prism_v2', JSON.stringify(st));
+                                }
+                              } catch (e) {}
+                            })();
+                            """.trimIndent(),
+                            null,
+                        )
+                    }
                 }
             }
             webChromeClient = object : WebChromeClient() {
@@ -686,15 +786,349 @@ class OverlayService : Service() {
             loadUrl(OVERLAY_ASSET_URL)
         }
 
-        root.addView(
+        contentHost.addView(
             wv,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+
+        val webContainer = createFloatingWebViewContainer()
+        contentHost.addView(
+            webContainer,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+
+        root.addView(
+            contentHost,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f),
         )
 
         panelContainer = root
         panelParams = params
         webView = wv
+        switchPanelTab(webTab = false)
         windowManager.addView(root, params)
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun createFloatingWebViewContainer(): LinearLayout {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#0A0E17"))
+            visibility = View.INVISIBLE
+        }
+
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.parseColor("#111826"))
+            setPadding(dpToPx(6), dpToPx(6), dpToPx(6), dpToPx(6))
+        }
+
+        fun navBtn(label: String, desc: String, onClick: () -> Unit): TextView {
+            return TextView(this).apply {
+                text = label
+                contentDescription = desc
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor("#E6EDF7"))
+                gravity = Gravity.CENTER
+                minWidth = dpToPx(30)
+                minHeight = dpToPx(34)
+                setPadding(dpToPx(6), dpToPx(4), dpToPx(6), dpToPx(4))
+                setOnClickListener { onClick() }
+            }
+        }
+
+        val urlBox = EditText(this).apply {
+            hint = "Cari di Google AI atau ketik URL…"
+            setHintTextColor(Color.parseColor("#4D5A72"))
+            setTextColor(Color.parseColor("#E6EDF7"))
+            textSize = 11.5f
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.END
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            imeOptions = EditorInfo.IME_ACTION_GO
+            setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dpToPx(8).toFloat()
+                setColor(Color.parseColor("#161F30"))
+                setStroke(dpToPx(1), Color.parseColor("#25314A"))
+            }
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_GO ||
+                    actionId == EditorInfo.IME_ACTION_SEARCH ||
+                    actionId == EditorInfo.IME_ACTION_DONE
+                ) {
+                    navigateFloatingWebInput(text.toString())
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+
+        val scanPill = TextView(this).apply {
+            text = "Scan"
+            contentDescription = "Scan kotak ke Google AI"
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#0A0E17"))
+            gravity = Gravity.CENTER
+            setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dpToPx(8).toFloat()
+                setColor(Color.parseColor("#00E5A0"))
+            }
+            setOnClickListener { requestScanBoxForWeb() }
+        }
+
+        val backBtn = navBtn("<", "Kembali") {
+            if (webBrowserView?.canGoBack() == true) webBrowserView?.goBack()
+        }
+        val fwdBtn = navBtn(">", "Maju") {
+            if (webBrowserView?.canGoForward() == true) webBrowserView?.goForward()
+        }
+        val reloadBtn = navBtn("↻", "Muat ulang") {
+            webBrowserView?.reload()
+        }
+
+        toolbar.addView(backBtn, LinearLayout.LayoutParams(dpToPx(28), dpToPx(34)))
+        toolbar.addView(fwdBtn, LinearLayout.LayoutParams(dpToPx(28), dpToPx(34)))
+        toolbar.addView(reloadBtn, LinearLayout.LayoutParams(dpToPx(28), dpToPx(34)))
+        toolbar.addView(
+            urlBox,
+            LinearLayout.LayoutParams(0, dpToPx(34), 1f).apply {
+                marginStart = dpToPx(4)
+                marginEnd = dpToPx(6)
+            },
+        )
+        toolbar.addView(scanPill, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dpToPx(34)))
+
+        val quickRowScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(Color.parseColor("#0D1320"))
+            setPadding(dpToPx(8), dpToPx(4), dpToPx(8), dpToPx(6))
+        }
+        val quickRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+
+        fun makeChip(title: String, onClick: () -> Unit): TextView {
+            return TextView(this).apply {
+                text = title
+                textSize = 10.5f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor("#E6EDF7"))
+                setPadding(dpToPx(10), dpToPx(4), dpToPx(10), dpToPx(4))
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dpToPx(12).toFloat()
+                    setColor(Color.parseColor("#161F30"))
+                    setStroke(dpToPx(1), Color.parseColor("#25314A"))
+                }
+                setOnClickListener { onClick() }
+            }
+        }
+
+        val chips = listOf(
+            makeChip("Google") {
+                prefs.preferGoogleAiMode = false
+                loadUrlInFloatingWeb(OverlayPreferences.buildGoogleSearchUrl(lastScannedQuery, aiMode = false))
+            },
+            makeChip("Google AI") {
+                prefs.preferGoogleAiMode = true
+                loadUrlInFloatingWeb(OverlayPreferences.buildGoogleSearchUrl(lastScannedQuery, aiMode = true))
+            },
+            makeChip("Gemini") {
+                loadUrlInFloatingWeb("https://gemini.google.com")
+            },
+            makeChip("Lens") {
+                loadUrlInFloatingWeb("https://lens.google.com")
+            },
+        )
+        chips.forEach { chip ->
+            quickRow.addView(
+                chip,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { marginEnd = dpToPx(6) },
+            )
+        }
+        quickRowScroll.addView(quickRow)
+
+        val statusBanner = TextView(this).apply {
+            textSize = 11f
+            setTextColor(Color.parseColor("#00E5A0"))
+            setBackgroundColor(Color.parseColor("#162238"))
+            setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+            visibility = View.GONE
+            setOnClickListener { visibility = View.GONE }
+        }
+
+        val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            visibility = View.GONE
+        }
+
+        val browser = WebView(this).apply {
+            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            isFocusable = true
+            isFocusableInTouchMode = true
+            settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                databaseEnabled = true
+                loadsImagesAutomatically = true
+                cacheMode = WebSettings.LOAD_DEFAULT
+                builtInZoomControls = true
+                displayZoomControls = false
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                val defaultUa = WebSettings.getDefaultUserAgent(this@OverlayService)
+                userAgentString = defaultUa.replace("; wv)", ")").replace("; wv", "")
+            }
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                ): Boolean {
+                    val uri = request?.url ?: return false
+                    val scheme = uri.scheme?.lowercase().orEmpty()
+                    return if (scheme == "http" || scheme == "https") {
+                        false
+                    } else {
+                        true
+                    }
+                }
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    if (!url.isNullOrBlank()) {
+                        urlBox.setText(url)
+                        prefs.lastFloatingUrl = url
+                    }
+                }
+            }
+            webChromeClient = object : WebChromeClient() {
+                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                    progress.progress = newProgress
+                    progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
+                }
+            }
+            loadUrl(prefs.lastFloatingUrl)
+        }
+
+        container.addView(
+            toolbar,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+        )
+        container.addView(
+            quickRowScroll,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+        )
+        container.addView(
+            statusBanner,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+        )
+        container.addView(
+            progress,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(2)),
+        )
+        container.addView(
+            browser,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f),
+        )
+
+        floatingWebContainer = container
+        webBrowserView = browser
+        webUrlInput = urlBox
+        webStatusBanner = statusBanner
+        webProgressBar = progress
+        return container
+    }
+
+    private fun showWebStatus(message: String, isError: Boolean = false) {
+        mainHandler.post {
+            webStatusBanner?.apply {
+                if (message.isBlank()) {
+                    visibility = View.GONE
+                } else {
+                    text = message
+                    setTextColor(Color.parseColor(if (isError) "#FF5E7E" else "#00E5A0"))
+                    setBackgroundColor(Color.parseColor(if (isError) "#291522" else "#162238"))
+                    visibility = View.VISIBLE
+                }
+            }
+        }
+    }
+
+    private fun switchPanelTab(webTab: Boolean) {
+        isWebTabActive = webTab
+        val prismWv = webView
+        val webCont = floatingWebContainer
+        if (webTab) {
+            prismWv?.visibility = View.INVISIBLE
+            webCont?.visibility = View.VISIBLE
+        } else {
+            prismWv?.visibility = View.VISIBLE
+            webCont?.visibility = View.INVISIBLE
+        }
+
+        tabPrismBtn?.apply {
+            setTextColor(Color.parseColor(if (!webTab) "#00E5A0" else "#8A97AD"))
+            setBackgroundColor(Color.parseColor(if (!webTab) "#161F30" else "#0D1320"))
+        }
+        tabWebBtn?.apply {
+            setTextColor(Color.parseColor(if (webTab) "#B47EFF" else "#8A97AD"))
+            setBackgroundColor(Color.parseColor(if (webTab) "#161F30" else "#0D1320"))
+        }
+    }
+
+    private fun navigateFloatingWebInput(rawInput: String) {
+        val trimmed = rawInput.trim()
+        if (trimmed.isEmpty()) return
+        val looksLikeUrl = trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true) ||
+            (!trimmed.contains(' ') && trimmed.contains('.'))
+        val target = if (looksLikeUrl) {
+            if (trimmed.startsWith("http://", ignoreCase = true) ||
+                trimmed.startsWith("https://", ignoreCase = true)
+            ) {
+                trimmed
+            } else {
+                "https://$trimmed"
+            }
+        } else {
+            lastScannedQuery = trimmed
+            OverlayPreferences.buildGoogleSearchUrl(trimmed, aiMode = prefs.preferGoogleAiMode)
+        }
+        loadUrlInFloatingWeb(target)
+    }
+
+    private fun loadUrlInFloatingWeb(url: String) {
+        mainHandler.post {
+            val safeUrl = url.ifBlank { OverlayPreferences.DEFAULT_GOOGLE_SEARCH_HOME }
+            switchPanelTab(webTab = true)
+            showPanel()
+            webUrlInput?.setText(safeUrl)
+            prefs.lastFloatingUrl = safeUrl
+            webBrowserView?.loadUrl(safeUrl)
+        }
     }
 
     // ---- Window 3: Selection Box ----
@@ -922,7 +1356,7 @@ class OverlayService : Service() {
         }
     }
 
-    // ---- Continuous Screen Watching (3fps -> 1fps) ----
+    // ---- Continuous Screen Watching (3fps -> 1fps) & Single-Shot Box Scan ----
     private fun requestStartWatching() {
         mainHandler.post {
             if (isWatching.get()) return@post
@@ -930,6 +1364,7 @@ class OverlayService : Service() {
             lockSelectionBoxInternal()
 
             val intent = Intent(this, ScreenCaptureActivity::class.java).apply {
+                putExtra(EXTRA_SCAN_MODE, SCAN_MODE_CONTINUOUS)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
             }
             try {
@@ -937,6 +1372,193 @@ class OverlayService : Service() {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start ScreenCaptureActivity", e)
                 stopWatchingInternal(notifyJs = true)
+            }
+        }
+    }
+
+    private fun requestScanBoxForWeb() {
+        mainHandler.post {
+            lockSelectionBoxInternal()
+            hidePanel()
+            showWebStatus("Menangkap isi kotak…")
+
+            if (isWatching.get() && activeProjection != null && activeImageReader != null) {
+                // Give WindowManager 220ms to remove the floating panel so we don't capture our own WebView.
+                captureHandler?.postDelayed({
+                    pendingSingleScanForWeb.set(true)
+                    processCaptureTick()
+                }, 220L)
+                return@post
+            }
+
+            val intent = Intent(this, ScreenCaptureActivity::class.java).apply {
+                putExtra(EXTRA_SCAN_MODE, SCAN_MODE_SINGLE_WEB)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            }
+            try {
+                startActivity(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start single-shot scan", e)
+                showPanel()
+                showWebStatus("Gagal memulai scan layar", isError = true)
+                evaluateJs("window.onSingleScanCancelled && window.onSingleScanCancelled('Gagal memulai scan layar')")
+            }
+        }
+    }
+
+    private fun captureSingleFrameForWeb(resultCode: Int, data: Intent) {
+        releaseCaptureResources()
+
+        try {
+            startForegroundCompat(watching = true)
+            val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            val projection = mgr.getMediaProjection(resultCode, data)
+            if (projection == null) {
+                startForegroundCompat(watching = false)
+                showPanel()
+                showWebStatus("Izin capture tidak tersedia", isError = true)
+                evaluateJs("window.onSingleScanCancelled && window.onSingleScanCancelled('Izin capture tidak tersedia')")
+                return
+            }
+            activeProjection = projection
+
+            val (screenW, screenH) = getScreenSizePx()
+            val densityDpi = resources.displayMetrics.densityDpi
+            val scale = if (screenW > MAX_WIDTH_PX) MAX_WIDTH_PX.toFloat() / screenW.toFloat() else 1f
+            captureScreenW = screenW.coerceAtLeast(1)
+            captureScreenH = screenH.coerceAtLeast(1)
+            captureW = (captureScreenW * scale).roundToInt().coerceAtLeast(1)
+            captureH = (captureScreenH * scale).roundToInt().coerceAtLeast(1)
+
+            val reader = ImageReader.newInstance(captureW, captureH, PixelFormat.RGBA_8888, 2)
+            activeImageReader = reader
+
+            val callback = object : MediaProjection.Callback() {
+                override fun onStop() {
+                    if (!isWatching.get()) {
+                        releaseCaptureResources()
+                    }
+                }
+            }
+            projectionCallback = callback
+            projection.registerCallback(callback, captureHandler)
+
+            activeVirtualDisplay = projection.createVirtualDisplay(
+                "PrismSingleScan",
+                captureW,
+                captureH,
+                densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                reader.surface,
+                null,
+                captureHandler,
+            )
+
+            attemptSingleFrameGrab(remainingAttempts = 20)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error capturing single scan frame", e)
+            releaseCaptureResources()
+            startForegroundCompat(watching = false)
+            showPanel()
+            showWebStatus("Gagal mengambil frame kotak", isError = true)
+            evaluateJs("window.onSingleScanCancelled && window.onSingleScanCancelled('Gagal mengambil frame kotak')")
+        }
+    }
+
+    private fun attemptSingleFrameGrab(remainingAttempts: Int) {
+        val delayMs = if (remainingAttempts == 20) 450L else 100L
+        captureHandler?.postDelayed({
+            val reader = activeImageReader
+            if (reader == null) {
+                releaseCaptureResources()
+                mainHandler.post {
+                    startForegroundCompat(watching = false)
+                    showPanel()
+                    showWebStatus("Reader capture ditutup", isError = true)
+                    evaluateJs("window.onSingleScanCancelled && window.onSingleScanCancelled('Reader ditutup')")
+                }
+                return@postDelayed
+            }
+
+            var image: Image? = null
+            var croppedBitmap: Bitmap? = null
+            try {
+                image = reader.acquireLatestImage()
+                if (image != null) {
+                    val bmp = copyImageToReusableBitmap(image)
+                    val candidate = FrameChangeDetector.cropBoxBitmap(
+                        fullBmp = bmp,
+                        box = getCurrentBoxBounds(),
+                        screenW = captureScreenW,
+                        screenH = captureScreenH,
+                        captureW = captureW,
+                        captureH = captureH,
+                        strokeInsetPx = dpToPx(2),
+                    )
+                    if (remainingAttempts > 4 && FrameChangeDetector.isBitmapMostlyBlank(candidate)) {
+                        candidate.recycle()
+                    } else {
+                        croppedBitmap = candidate
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Single frame grab attempt failed", e)
+            } finally {
+                try {
+                    image?.close()
+                } catch (_: Exception) {
+                }
+            }
+
+            if (croppedBitmap != null) {
+                releaseCaptureResources()
+                mainHandler.post {
+                    startForegroundCompat(watching = false)
+                }
+                handleScannedBoxBitmap(croppedBitmap)
+            } else if (remainingAttempts > 1) {
+                attemptSingleFrameGrab(remainingAttempts - 1)
+            } else {
+                releaseCaptureResources()
+                mainHandler.post {
+                    startForegroundCompat(watching = false)
+                    showPanel()
+                    showWebStatus("Layar di kotak tidak terbaca, coba ulang", isError = true)
+                    evaluateJs("window.onSingleScanCancelled && window.onSingleScanCancelled('Frame layar kosong, coba ulang')")
+                }
+            }
+        }, delayMs)
+    }
+
+    private fun handleScannedBoxBitmap(croppedBitmap: Bitmap) {
+        val base64 = FrameChangeDetector.encodeBitmapToBase64(croppedBitmap)
+
+        mainHandler.post {
+            switchPanelTab(webTab = true)
+            showPanel()
+            showWebStatus("Membaca teks di dalam kotak…")
+        }
+
+        BoxTextRecognizer.recognizeBitmap(croppedBitmap) { ocrText ->
+            try {
+                croppedBitmap.recycle()
+            } catch (_: Exception) {
+            }
+
+            mainHandler.post {
+                val quotedOcr = JSONObject.quote(ocrText)
+                if (ocrText.isNotEmpty()) {
+                    lastScannedQuery = ocrText
+                    showWebStatus("Scan: $ocrText")
+                    val targetUrl = OverlayPreferences.buildGoogleSearchUrl(
+                        query = ocrText,
+                        aiMode = prefs.preferGoogleAiMode,
+                    )
+                    loadUrlInFloatingWeb(targetUrl)
+                } else {
+                    showWebStatus("Teks tidak terdeteksi OCR — mencoba AI Vision…")
+                }
+                evaluateJs("window.onScanForWeb && window.onScanForWeb('$base64', $quotedOcr)")
             }
         }
     }
@@ -965,12 +1587,7 @@ class OverlayService : Service() {
             val reader = ImageReader.newInstance(captureW, captureH, PixelFormat.RGBA_8888, 2)
             activeImageReader = reader
 
-            if (smallBitmap == null || smallBitmap?.isRecycled == true) {
-                smallBitmap = Bitmap.createBitmap(DIFF_W, DIFF_H, Bitmap.Config.ARGB_8888)
-                smallCanvas = Canvas(smallBitmap!!)
-            }
-
-            hasRefFrame = false
+            frameChangeDetector.reset()
             lastChangeTimeMs = SystemClock.elapsedRealtime()
             isWatching.set(true)
             prefs.isWatchRunning = true
@@ -1035,7 +1652,7 @@ class OverlayService : Service() {
         }
     }
 
-    private fun analyzeCapturedImage(image: Image) {
+    private fun copyImageToReusableBitmap(image: Image): Bitmap {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val pixelStride = plane.pixelStride
@@ -1051,93 +1668,46 @@ class OverlayService : Service() {
         }
         buffer.rewind()
         fullBmp.copyPixelsFromBuffer(buffer)
+        return fullBmp
+    }
 
-        // Map current selection box from screen pixels to capture coordinates, inset slightly inside 2dp stroke.
+    private fun analyzeCapturedImage(image: Image) {
+        val fullBmp = copyImageToReusableBitmap(image)
         val box = getCurrentBoxBounds()
-        val scaleX = captureW.toFloat() / captureScreenW.toFloat()
-        val scaleY = captureH.toFloat() / captureScreenH.toFloat()
-        val strokeInsetPx = (dpToPx(2) * scaleX).roundToInt()
 
-        val cropLeft = (box.x * scaleX).roundToInt().plus(strokeInsetPx).coerceIn(0, (captureW - 2).coerceAtLeast(0))
-        val cropTop = (box.y * scaleY).roundToInt().plus(strokeInsetPx).coerceIn(0, (captureH - 2).coerceAtLeast(0))
-        val cropRight = ((box.x + box.w) * scaleX).roundToInt().minus(strokeInsetPx).coerceIn(cropLeft + 1, captureW)
-        val cropBottom = ((box.y + box.h) * scaleY).roundToInt().minus(strokeInsetPx).coerceIn(cropTop + 1, captureH)
-        val cropW = (cropRight - cropLeft).coerceAtLeast(1)
-        val cropH = (cropBottom - cropTop).coerceAtLeast(1)
-
-        srcRect.set(cropLeft, cropTop, cropRight, cropBottom)
-        val sBmp = smallBitmap ?: return
-        val sCanvas = smallCanvas ?: return
-        sCanvas.drawBitmap(fullBmp, srcRect, dstSmallRect, smallPaint)
-        sBmp.getPixels(smallPixels, 0, DIFF_W, 0, 0, DIFF_W, DIFF_H)
-
-        for (i in 0 until DIFF_PIXEL_COUNT) {
-            val c = smallPixels[i]
-            val r = (c shr 16) and 0xFF
-            val g = (c shr 8) and 0xFF
-            val b = c and 0xFF
-            currGray[i] = 0.299f * r + 0.587f * g + 0.114f * b
+        if (pendingSingleScanForWeb.getAndSet(false)) {
+            val scanBmp = FrameChangeDetector.cropBoxBitmap(
+                fullBmp = fullBmp,
+                box = box,
+                screenW = captureScreenW,
+                screenH = captureScreenH,
+                captureW = captureW,
+                captureH = captureH,
+                strokeInsetPx = dpToPx(2),
+            )
+            handleScannedBoxBitmap(scanBmp)
         }
 
-        val shouldEmit: Boolean
-        if (!hasRefFrame) {
-            currGray.copyInto(refGray)
-            hasRefFrame = true
+        val result = frameChangeDetector.evaluateFrame(
+            fullBitmap = fullBmp,
+            box = box,
+            screenW = captureScreenW,
+            screenH = captureScreenH,
+            captureW = captureW,
+            captureH = captureH,
+            strokeInsetPx = dpToPx(2),
+            sensitivity = sensitivityThreshold,
+        )
+
+        if (result.shouldEmit && result.base64Png != null) {
             lastChangeTimeMs = SystemClock.elapsedRealtime()
-            shouldEmit = true
-        } else {
-            var changed = 0
-            for (i in 0 until DIFF_PIXEL_COUNT) {
-                if (abs(currGray[i] - refGray[i]) > PIXEL_DELTA_THRESHOLD) {
-                    changed++
-                }
-            }
-            val ratio = changed.toFloat() / DIFF_PIXEL_COUNT.toFloat()
-            if (ratio > sensitivityThreshold) {
-                currGray.copyInto(refGray)
-                lastChangeTimeMs = SystemClock.elapsedRealtime()
-                shouldEmit = true
-            } else {
-                // Slow moving average absorbs minor clock/cursor drift without re-triggering.
-                for (i in 0 until DIFF_PIXEL_COUNT) {
-                    refGray[i] = refGray[i] * 0.9f + currGray[i] * 0.1f
-                }
-                shouldEmit = false
-            }
-        }
-
-        if (shouldEmit) {
-            val base64 = encodeCroppedPngBase64(fullBmp, cropLeft, cropTop, cropW, cropH)
+            val base64 = result.base64Png
             mainHandler.post {
                 if (isWatching.get()) {
                     evaluateJs("window.onFrame && window.onFrame('$base64')")
                 }
             }
         }
-    }
-
-    private fun encodeCroppedPngBase64(
-        fullBmp: Bitmap,
-        cropLeft: Int,
-        cropTop: Int,
-        cropW: Int,
-        cropH: Int,
-    ): String {
-        val cropped = Bitmap.createBitmap(fullBmp, cropLeft, cropTop, cropW, cropH)
-        val exportBmp = if (cropped.width > MAX_WIDTH_PX) {
-            val ratio = MAX_WIDTH_PX.toFloat() / cropped.width.toFloat()
-            val targetH = (cropped.height * ratio).roundToInt().coerceAtLeast(1)
-            Bitmap.createScaledBitmap(cropped, MAX_WIDTH_PX, targetH, true).also {
-                if (it !== cropped) cropped.recycle()
-            }
-        } else {
-            cropped
-        }
-
-        val out = ByteArrayOutputStream()
-        exportBmp.compress(Bitmap.CompressFormat.PNG, 100, out)
-        exportBmp.recycle()
-        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     }
 
     private fun scheduleNextFrameTick(delayMs: Long) {
@@ -1191,14 +1761,7 @@ class OverlayService : Service() {
         } catch (_: Exception) {
         }
         reusableFullBitmap = null
-
-        try {
-            smallBitmap?.recycle()
-        } catch (_: Exception) {
-        }
-        smallBitmap = null
-        smallCanvas = null
-        hasRefFrame = false
+        frameChangeDetector.reset()
     }
 
     private fun pushBoxChangedToJs(bounds: BoxBounds) {
@@ -1310,6 +1873,106 @@ class OverlayService : Service() {
         }
 
         @JavascriptInterface
+        fun getDefaultApiKey(): String {
+            return resolveConfiguredApiKey(BuildConfig.GEMINI_API_KEY)
+        }
+
+        @JavascriptInterface
+        fun isAccessibilityEnabled(): Boolean {
+            return PrismAccessibilityService.isAccessibilityEnabled()
+        }
+
+        @JavascriptInterface
+        fun openAccessibilitySettings() {
+            mainHandler.post {
+                try {
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to open Accessibility settings", e)
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun setAutoClickEnabled(enabled: Boolean) {
+            prefs.isAutoClickEnabled = enabled
+        }
+
+        @JavascriptInterface
+        fun isAutoClickEnabled(): Boolean {
+            return prefs.isAutoClickEnabled
+        }
+
+        @JavascriptInterface
+        fun autoClickAnswer(answerText: String?, answerIndex: Int, optionsJson: String?) {
+            val service = PrismAccessibilityService.getInstance()
+            if (service == null) {
+                evaluateJs(
+                    "window.onAutoClickResult && window.onAutoClickResult(false, ${
+                        JSONObject.quote("Aktifkan Prism Auto-Click di Accessibility Settings")
+                    })",
+                )
+                return
+            }
+
+            val options = mutableListOf<String>()
+            if (!optionsJson.isNullOrBlank()) {
+                try {
+                    val arr = JSONArray(optionsJson)
+                    for (i in 0 until arr.length()) {
+                        options.add(arr.optString(i, ""))
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
+            service.performAutoClickForAnswer(
+                answerText = answerText.orEmpty(),
+                answerIndex = answerIndex,
+                options = options,
+            ) { success, message ->
+                evaluateJs("window.onAutoClickResult && window.onAutoClickResult($success, ${JSONObject.quote(message)})")
+            }
+        }
+
+        @JavascriptInterface
+        fun scanBoxToGoogleAi() {
+            requestScanBoxForWeb()
+        }
+
+        @JavascriptInterface
+        fun notifyWebScanStatus(message: String?, isError: Boolean) {
+            showWebStatus(message.orEmpty(), isError)
+        }
+
+        @JavascriptInterface
+        fun openGoogleAiSearch(query: String?) {
+            val cleaned = query?.trim().orEmpty()
+            if (cleaned.isNotEmpty()) {
+                lastScannedQuery = cleaned
+            }
+            val targetUrl = OverlayPreferences.buildGoogleSearchUrl(
+                query = cleaned,
+                aiMode = prefs.preferGoogleAiMode,
+            )
+            showWebStatus(if (cleaned.isNotEmpty()) "Mencari: $cleaned" else "")
+            loadUrlInFloatingWeb(targetUrl)
+        }
+
+        @JavascriptInterface
+        fun openFloatingWeb(url: String?) {
+            val target = url?.trim().orEmpty()
+            if (target.isEmpty()) {
+                loadUrlInFloatingWeb(prefs.lastFloatingUrl)
+            } else {
+                navigateFloatingWebInput(target)
+            }
+        }
+
+        @JavascriptInterface
         fun log(message: String?) {
             Log.d(TAG, "JS: ${message ?: ""}")
         }
@@ -1317,17 +1980,18 @@ class OverlayService : Service() {
 
     companion object {
         private const val TAG = "PrismOverlayService"
+        private const val PLACEHOLDER_GEMINI_KEY = "MY_GEMINI_API_KEY"
+
+        internal fun resolveConfiguredApiKey(rawKey: String?): String {
+            val trimmed = rawKey?.trim().orEmpty()
+            return if (trimmed.isEmpty() || trimmed == PLACEHOLDER_GEMINI_KEY) "" else trimmed
+        }
         private const val CHANNEL_ID = "prism_overlay_channel"
         private const val NOTIFICATION_ID = 4101
         private const val JS_BRIDGE_NAME = "AndroidBridge"
         private const val OVERLAY_ASSET_URL = "file:///android_asset/overlay.html"
 
         private const val MAX_WIDTH_PX = 1280
-        private const val DIFF_W = 64
-        private const val DIFF_H = 36
-        private const val DIFF_PIXEL_COUNT = DIFF_W * DIFF_H
-        private const val PIXEL_DELTA_THRESHOLD = 16f
-
         private const val FPS_3_INTERVAL_MS = 333L
         private const val FPS_1_INTERVAL_MS = 1000L
         private const val IDLE_DROP_AFTER_MS = 10_000L
@@ -1341,5 +2005,9 @@ class OverlayService : Service() {
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
         const val EXTRA_ERROR_MESSAGE = "extra_error_message"
+        const val EXTRA_SCAN_MODE = "extra_scan_mode"
+
+        const val SCAN_MODE_CONTINUOUS = "continuous"
+        const val SCAN_MODE_SINGLE_WEB = "single_web"
     }
 }

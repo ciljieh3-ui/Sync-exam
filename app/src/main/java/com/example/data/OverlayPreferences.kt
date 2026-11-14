@@ -40,6 +40,24 @@ class OverlayPreferences(context: Context) {
             prefs.edit().putBoolean(KEY_WATCH_RUNNING, value).apply()
         }
 
+    var isAutoClickEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_CLICK_ENABLED, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_AUTO_CLICK_ENABLED, value).apply()
+        }
+
+    var lastFloatingUrl: String
+        get() = prefs.getString(KEY_LAST_FLOATING_URL, DEFAULT_GOOGLE_SEARCH_HOME) ?: DEFAULT_GOOGLE_SEARCH_HOME
+        set(value) {
+            prefs.edit().putString(KEY_LAST_FLOATING_URL, value).apply()
+        }
+
+    var preferGoogleAiMode: Boolean
+        get() = prefs.getBoolean(KEY_PREFER_GOOGLE_AI_MODE, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_PREFER_GOOGLE_AI_MODE, value).apply()
+        }
+
     var bubbleX: Int
         get() = prefs.getInt(KEY_BUBBLE_X, UNSET_COORD)
         set(value) {
@@ -109,6 +127,9 @@ class OverlayPreferences(context: Context) {
         private const val PREFS_NAME = "prism_overlay_prefs"
         private const val KEY_OVERLAY_ENABLED = "overlay_enabled"
         private const val KEY_WATCH_RUNNING = "watch_running"
+        private const val KEY_AUTO_CLICK_ENABLED = "auto_click_enabled"
+        private const val KEY_LAST_FLOATING_URL = "last_floating_url"
+        private const val KEY_PREFER_GOOGLE_AI_MODE = "prefer_google_ai_mode"
         private const val KEY_BUBBLE_X = "bubble_x"
         private const val KEY_BUBBLE_Y = "bubble_y"
         private const val KEY_PANEL_X = "panel_x"
@@ -119,6 +140,8 @@ class OverlayPreferences(context: Context) {
         private const val KEY_BOX_H = "box_h"
         private const val KEY_SENSITIVITY = "sensitivity"
         const val DEFAULT_SENSITIVITY = 0.05f
+        const val DEFAULT_GOOGLE_SEARCH_HOME = "https://www.google.com"
+        const val DEFAULT_GOOGLE_AI_URL = "https://www.google.com/search?udm=50"
         const val UNSET_COORD = Int.MIN_VALUE
 
         private val _serviceRunning = MutableStateFlow(false)
@@ -133,6 +156,23 @@ class OverlayPreferences(context: Context) {
 
         fun setWatchingActive(watching: Boolean) {
             _watchingActive.value = watching
+        }
+
+        fun buildGoogleSearchUrl(query: String, aiMode: Boolean = false): String {
+            val cleaned = query.trim().replace(Regex("\\s+"), " ")
+            if (cleaned.isEmpty()) {
+                return if (aiMode) DEFAULT_GOOGLE_AI_URL else DEFAULT_GOOGLE_SEARCH_HOME
+            }
+            val encoded = android.net.Uri.encode(cleaned)
+            return if (aiMode) {
+                "https://www.google.com/search?udm=50&q=$encoded"
+            } else {
+                "https://www.google.com/search?q=$encoded"
+            }
+        }
+
+        fun buildGoogleAiSearchUrl(query: String): String {
+            return buildGoogleSearchUrl(query, aiMode = true)
         }
     }
 }

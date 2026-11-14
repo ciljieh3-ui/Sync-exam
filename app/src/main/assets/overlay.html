@@ -50,7 +50,18 @@ input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit
 .btn:active{transform:scale(.98)}
 .btn:disabled{opacity:.4;pointer-events:none}
 .btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#0a0e17;border:none}
+.btn.web{background:rgba(180,126,255,.14);color:var(--accent-2);border-color:rgba(180,126,255,.35)}
 .btn.danger{color:var(--danger);border-color:rgba(255,94,126,.3)}
+.btn.sm{padding:8px 10px;font-size:11.5px}
+
+/* Auto-Click bar */
+.auto-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;padding:9px 10px;border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border)}
+.auto-left{display:flex;flex-direction:column;gap:2px;min-width:0}
+.auto-title{font-size:12px;font-weight:600;color:var(--text)}
+.auto-status{font-size:10px;font-family:var(--font-mono);color:var(--warn);cursor:pointer;text-decoration:underline}
+.auto-status.ok{color:var(--accent);text-decoration:none;cursor:default}
+.toggle-pill{padding:5px 11px;border-radius:999px;font-size:11px;font-weight:700;font-family:var(--font-mono);border:1px solid var(--border-2);background:var(--surface-3);color:var(--text-2);cursor:pointer;flex-shrink:0}
+.toggle-pill.on{background:rgba(0,229,160,.16);border-color:var(--accent);color:var(--accent)}
 
 /* Answer display */
 .answer-card{background:linear-gradient(135deg,rgba(0,229,160,.06),rgba(180,126,255,.06));border:1px solid rgba(0,229,160,.25);border-radius:var(--radius);padding:16px;margin-bottom:14px;display:none;animation:pop .35s cubic-bezier(.22,1,.36,1)}
@@ -111,7 +122,7 @@ input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit
     <div class="mark"><svg viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
     <div>
       <div class="title">Prism</div>
-      <div class="sub" id="modelLabel">gemini-2.5-flash</div>
+      <div class="sub" id="modelLabel">gemini-flash-latest</div>
     </div>
   </div>
   <button class="hbtn" id="openSettings" aria-label="Settings">
@@ -132,23 +143,35 @@ input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit
     </div>
     <div class="btn-row">
       <button class="btn primary" id="watchBtn" disabled>Start Watching</button>
+      <button class="btn web" id="scanWebBtn" disabled>Scan -> Google AI</button>
+    </div>
+    <div class="auto-bar">
+      <div class="auto-left">
+        <div class="auto-title">Auto-Click Jawaban</div>
+        <div class="auto-status" id="accStatusBadge">Perlu izin Accessibility (Tap)</div>
+      </div>
+      <button class="toggle-pill" id="autoClickToggle" type="button">OFF</button>
     </div>
   </div>
 
-  <div class="reading" id="reading"><div class="spinner"></div><span>Membaca area…</span></div>
+  <div class="reading" id="reading"><div class="spinner"></div><span id="readingText">Membaca area…</span></div>
 
   <div class="answer-card" id="answerCard">
     <div class="a-label">Answer</div>
     <div class="a-text" id="aText">—</div>
     <div class="q-text" id="qText"></div>
     <div class="opts" id="opts"></div>
+    <div class="btn-row" style="margin-bottom:10px">
+      <button class="btn sm" id="clickAnswerBtn" type="button">Klik Jawaban</button>
+      <button class="btn sm web" id="askGoogleAiBtn" type="button">Cari Google AI</button>
+    </div>
     <div class="meta" id="meta"></div>
   </div>
 
   <div class="idle" id="idle">
     <svg class="idle-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
     <div class="idle-title">Siap memantau</div>
-    <div class="idle-sub">Pasang kotak di area soal, lalu Start Watching.<br>Jawaban akan muncul otomatis saat soal baru terdeteksi.</div>
+    <div class="idle-sub">Pasang kotak di area soal, lalu Start Watching atau Scan ke Google AI.<br>Aktifkan Auto-Click untuk memilih jawaban otomatis.</div>
   </div>
 </main>
 
@@ -168,7 +191,8 @@ input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit
     <div class="field">
       <label>Model</label>
       <select class="select" id="model">
-        <option value="gemini-2.5-flash">gemini-2.5-flash (recommended)</option>
+        <option value="gemini-flash-latest">gemini-flash-latest (recommended)</option>
+        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
         <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (faster, cheaper)</option>
         <option value="gemini-2.0-flash">gemini-2.0-flash</option>
       </select>
@@ -201,9 +225,10 @@ input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit
   const STORE = 'prism_v2';
   const defaults = {
     apiKey: '',
-    model: 'gemini-2.5-flash',
+    model: 'gemini-flash-latest',
     lang: 'auto',
     sensitivity: 0.05,
+    autoClick: false,
     box: null, // {x,y,w,h} from Kotlin
   };
 
@@ -215,6 +240,7 @@ input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit
   let pendingFrame = null;
   let toastTimer = null;
   let boxLocked = false;
+  let lastResult = null;
 
   const $ = id => document.getElementById(id);
 
@@ -233,28 +259,61 @@ input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit
     t.textContent = msg;
     t.className = 'toast show ' + (kind || '');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
   }
 
-  function setReading(on) {
+  function setReading(on, label) {
+    if (label && $('readingText')) {
+      $('readingText').textContent = label;
+    } else if ($('readingText')) {
+      $('readingText').textContent = 'Membaca area…';
+    }
     $('reading').classList.toggle('show', on);
+  }
+
+  function isAccessibilityReady() {
+    try {
+      return Boolean(window.AndroidBridge?.isAccessibilityEnabled?.());
+    } catch {
+      return false;
+    }
+  }
+
+  function updateAutoClickUI() {
+    const toggle = $('autoClickToggle');
+    const badge = $('accStatusBadge');
+    const ready = isAccessibilityReady();
+
+    toggle.textContent = state.autoClick ? 'ON' : 'OFF';
+    toggle.classList.toggle('on', Boolean(state.autoClick));
+
+    if (ready) {
+      badge.textContent = 'Accessibility aktif';
+      badge.className = 'auto-status ok';
+    } else {
+      badge.textContent = 'Perlu izin Accessibility (Tap)';
+      badge.className = 'auto-status';
+    }
   }
 
   function updateBoxUI() {
     const info = $('boxInfo');
     const watchBtn = $('watchBtn');
     const lockBtn = $('lockAreaBtn');
+    const scanWebBtn = $('scanWebBtn');
 
     if (state.box) {
       const { x, y, w, h } = state.box;
       info.innerHTML = `Area aktif: <b>${w}×${h}</b> px @ (${x}, ${y})`;
       watchBtn.disabled = false;
       lockBtn.disabled = false;
+      scanWebBtn.disabled = false;
       lockBtn.textContent = boxLocked ? 'Unlock' : 'Lock';
     } else {
       info.innerHTML = 'Kotak belum diatur. Tap <b>Set Area</b> untuk pasang kotak pilih di layar.';
       watchBtn.disabled = true;
       lockBtn.disabled = true;
+      scanWebBtn.disabled = true;
     }
   }
 
@@ -335,6 +394,51 @@ input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit
     setReading(false);
   }
 
+  function scanToGoogleAi() {
+    if (!window.AndroidBridge?.scanBoxToGoogleAi) {
+      showToast('Native bridge tidak tersedia', 'err');
+      return;
+    }
+    if (!state.box) {
+      showToast('Set area kotak dulu', 'err');
+      return;
+    }
+    try {
+      setReading(true, 'Menangkap area kotak…');
+      window.AndroidBridge.scanBoxToGoogleAi();
+    } catch (e) {
+      setReading(false);
+      showToast('Gagal scan: ' + e.message, 'err');
+    }
+  }
+
+  function buildSearchQueryFromResult(res) {
+    if (!res) return '';
+    const q = (res.question || '').trim();
+    const opts = Array.isArray(res.options)
+      ? res.options.map(o => String(o || '').trim()).filter(Boolean)
+      : [];
+    if (q && opts.length > 0) {
+      return `${q} ${opts.join(' ')}`;
+    }
+    return q || (res.answer || '').trim();
+  }
+
+  function triggerAutoClickFromResult(res) {
+    if (!res || !window.AndroidBridge?.autoClickAnswer) return;
+    if (!isAccessibilityReady()) {
+      showToast('Aktifkan Accessibility untuk Auto-Click', 'err');
+      return;
+    }
+    try {
+      const idx = typeof res.answerIndex === 'number' ? res.answerIndex : -1;
+      const optsJson = JSON.stringify(Array.isArray(res.options) ? res.options : []);
+      window.AndroidBridge.autoClickAnswer(res.answer || '', idx, optsJson);
+    } catch (e) {
+      showToast('Auto-klik gagal: ' + e.message, 'err');
+    }
+  }
+
   // ---- Bridge: Kotlin -> HTML ----
   window.onBoxChanged = function(json) {
     try {
@@ -360,6 +464,66 @@ input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit
       $('watchBtn').textContent = 'Start Watching';
       $('watchBtn').classList.add('primary');
       $('watchBtn').classList.remove('danger');
+    }
+  };
+
+  window.onAutoClickResult = function(success, msg) {
+    if (msg) {
+      showToast(msg, success ? 'ok' : 'err');
+    }
+  };
+
+  window.onSingleScanCancelled = function(msg) {
+    setReading(false);
+    showToast(msg || 'Scan dibatalkan', 'err');
+  };
+
+  window.onScanForWeb = async function(base64, ocrText) {
+    const hasOcr = typeof ocrText === 'string' && ocrText.trim().length > 0;
+    if (!state.apiKey) {
+      setReading(false);
+      if (!hasOcr) {
+        if (window.AndroidBridge?.notifyWebScanStatus) {
+          window.AndroidBridge.notifyWebScanStatus('Teks kosong — geser kotak ke soal atau isi API key', true);
+        }
+        showToast('Teks di kotak tidak terbaca (API key belum diset)', 'err');
+      }
+      return;
+    }
+
+    setReading(true, hasOcr ? 'Menganalisis jawaban AI…' : 'Membaca soal & cari di Google…');
+    try {
+      const dataUrl = base64.startsWith('data:')
+        ? base64
+        : 'data:image/png;base64,' + base64;
+      const result = await callGemini(dataUrl);
+      if (result && (result.question || result.answer)) {
+        renderResult(result, { skipAutoClick: true });
+        if (!hasOcr) {
+          const query = buildSearchQueryFromResult(result);
+          if (query && window.AndroidBridge?.openGoogleAiSearch) {
+            window.AndroidBridge.openGoogleAiSearch(query);
+            showToast('Membuka Google…', 'ok');
+          } else if (window.AndroidBridge?.notifyWebScanStatus) {
+            window.AndroidBridge.notifyWebScanStatus('Soal tidak terbaca di dalam kotak', true);
+          }
+        }
+      } else if (!hasOcr) {
+        if (window.AndroidBridge?.notifyWebScanStatus) {
+          window.AndroidBridge.notifyWebScanStatus('Soal tidak terbaca di kotak — posisikan ulang kotak', true);
+        }
+        showToast('Soal tidak terbaca di kotak', 'err');
+      }
+    } catch (err) {
+      if (!hasOcr) {
+        const msg = 'Scan gagal: ' + (err.message || 'error');
+        if (window.AndroidBridge?.notifyWebScanStatus) {
+          window.AndroidBridge.notifyWebScanStatus(msg, true);
+        }
+        showToast(msg, 'err');
+      }
+    } finally {
+      setReading(false);
     }
   };
 
@@ -449,10 +613,13 @@ Respond ONLY with valid JSON matching the schema.`;
       }
     };
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${state.model}:generateContent?key=${encodeURIComponent(state.apiKey)}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${state.model}:generateContent`;
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-goog-api-key': state.apiKey
+      },
       body: JSON.stringify(body)
     });
 
@@ -469,13 +636,15 @@ Respond ONLY with valid JSON matching the schema.`;
     return JSON.parse(text);
   }
 
-  function renderResult(data) {
+  function renderResult(data, optsConfig = {}) {
     const { question, options = [], answer, answerIndex, confidence = 0.8 } = data;
 
     if (!question && !answer) {
       $('answerCard').classList.remove('show');
       return;
     }
+
+    lastResult = { question, options, answer, answerIndex, confidence };
 
     $('aText').textContent = answer || '(tidak yakin)';
     $('qText').textContent = question || '';
@@ -513,6 +682,11 @@ Respond ONLY with valid JSON matching the schema.`;
     try {
       if (window.AndroidBridge?.pulseBubble) window.AndroidBridge.pulseBubble();
     } catch {}
+
+    // Auto-Click answer on screen when enabled and Accessibility service is active
+    if (!optsConfig.skipAutoClick && state.autoClick && isAccessibilityReady()) {
+      setTimeout(() => triggerAutoClickFromResult(lastResult), 120);
+    }
   }
 
   function copyAnswer(text) {
@@ -555,6 +729,40 @@ Respond ONLY with valid JSON matching the schema.`;
   $('watchBtn').addEventListener('click', () => {
     if (watchActive) stopWatch(); else startWatch();
   });
+  $('scanWebBtn').addEventListener('click', scanToGoogleAi);
+
+  $('accStatusBadge').addEventListener('click', () => {
+    if (!isAccessibilityReady() && window.AndroidBridge?.openAccessibilitySettings) {
+      window.AndroidBridge.openAccessibilitySettings();
+    }
+  });
+
+  $('autoClickToggle').addEventListener('click', () => {
+    const next = !state.autoClick;
+    state.autoClick = next;
+    saveState();
+    try { window.AndroidBridge?.setAutoClickEnabled?.(next); } catch {}
+    updateAutoClickUI();
+    if (next && !isAccessibilityReady()) {
+      showToast('Aktifkan Prism Auto-Click di Accessibility Settings', 'err');
+      try { window.AndroidBridge?.openAccessibilitySettings?.(); } catch {}
+    } else {
+      showToast(next ? 'Auto-Click aktif' : 'Auto-Click nonaktif', 'ok');
+    }
+  });
+
+  $('clickAnswerBtn').addEventListener('click', () => {
+    if (!lastResult) return;
+    triggerAutoClickFromResult(lastResult);
+  });
+
+  $('askGoogleAiBtn').addEventListener('click', () => {
+    const q = buildSearchQueryFromResult(lastResult);
+    if (!q) return;
+    if (window.AndroidBridge?.openGoogleAiSearch) {
+      window.AndroidBridge.openGoogleAiSearch(q);
+    }
+  });
 
   // Settings
   function openSettings() {
@@ -587,6 +795,7 @@ Respond ONLY with valid JSON matching the schema.`;
 
   $('clearHistory').addEventListener('click', () => {
     lastQuestionHash = '';
+    lastResult = null;
     $('answerCard').classList.remove('show');
     $('idle').classList.remove('hidden');
     showToast('Cleared', 'ok');
@@ -596,8 +805,10 @@ Respond ONLY with valid JSON matching the schema.`;
     if (!confirm('Hapus semua data termasuk API key?')) return;
     localStorage.removeItem(STORE);
     state = { ...defaults };
+    lastResult = null;
     $('apiKey').value = '';
     $('modelLabel').textContent = defaults.model;
+    updateAutoClickUI();
     closeSettings();
     showToast('Reset', 'ok');
   });
@@ -610,12 +821,28 @@ Respond ONLY with valid JSON matching the schema.`;
     }
   });
 
+  window.addEventListener('focus', updateAutoClickUI);
+  document.addEventListener('visibilitychange', updateAutoClickUI);
+
   // Init
   $('modelLabel').textContent = state.model;
   updateBoxUI();
+  updateAutoClickUI();
 
-  // Ask native for current box if already set
+  // Ask native for current box, default API key, and Auto-Click state
   setTimeout(() => {
+    if (!state.apiKey && window.AndroidBridge?.getDefaultApiKey) {
+      try {
+        const k = window.AndroidBridge.getDefaultApiKey();
+        if (k) { state.apiKey = k; saveState(); }
+      } catch {}
+    }
+    if (window.AndroidBridge?.isAutoClickEnabled) {
+      try {
+        state.autoClick = Boolean(window.AndroidBridge.isAutoClickEnabled());
+        saveState();
+      } catch {}
+    }
     if (window.AndroidBridge?.getBoxBounds) {
       try {
         const box = window.AndroidBridge.getBoxBounds();
@@ -625,6 +852,7 @@ Respond ONLY with valid JSON matching the schema.`;
     if (window.AndroidBridge?.setSensitivity) {
       try { window.AndroidBridge.setSensitivity(state.sensitivity); } catch {}
     }
+    updateAutoClickUI();
   }, 500);
 
 })();

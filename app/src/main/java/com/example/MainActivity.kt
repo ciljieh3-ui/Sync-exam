@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
@@ -76,6 +77,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.OverlayPreferences
 import com.example.service.OverlayService
+import com.example.service.PrismAccessibilityService
 import com.example.ui.theme.PrismBorder
 import com.example.ui.theme.PrismDanger
 import com.example.ui.theme.PrismMint
@@ -122,6 +124,7 @@ private fun PrismControlScreen() {
     }
     val isServiceRunning by OverlayPreferences.serviceRunning.collectAsStateWithLifecycle()
     val isWatchingActive by OverlayPreferences.watchingActive.collectAsStateWithLifecycle()
+    val isAccessibilityEnabled by PrismAccessibilityService.isConnected.collectAsStateWithLifecycle()
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -152,6 +155,10 @@ private fun PrismControlScreen() {
             Uri.parse("package:${context.packageName}"),
         )
         context.startActivity(intent)
+    }
+
+    fun openAccessibilitySettings() {
+        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
 
     val notificationLauncher = rememberLauncherForActivityResult(
@@ -246,6 +253,11 @@ private fun PrismControlScreen() {
                             )
                         }
                         StatusRow(
+                            label = "Auto-Click (Accessibility)",
+                            value = if (isAccessibilityEnabled) "Enabled" else "Disabled",
+                            accent = if (isAccessibilityEnabled) PrismMint else PrismTextMuted,
+                        )
+                        StatusRow(
                             label = "Prism Overlay",
                             value = when {
                                 isWatchingActive -> "Watching"
@@ -295,6 +307,38 @@ private fun PrismControlScreen() {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = stringResource(R.string.btn_enable_overlay),
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = { openAccessibilitySettings() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .testTag("enable_accessibility_button"),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isAccessibilityEnabled) PrismBorder else PrismViolet,
+                            ),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = PrismSurfaceVariant,
+                                contentColor = if (isAccessibilityEnabled) PrismText else PrismViolet,
+                            ),
+                        ) {
+                            Icon(
+                                imageVector = if (isAccessibilityEnabled) {
+                                    Icons.Filled.CheckCircle
+                                } else {
+                                    Icons.Filled.TouchApp
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(R.string.btn_enable_accessibility),
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }
@@ -380,7 +424,7 @@ private fun PrismControlScreen() {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Tap bubble for panel • Long-press bubble to set watch box • No AccessibilityService",
+                        text = "Tap bubble for Prism AI & Floating Web • Long-press bubble to set watch box",
                         style = MaterialTheme.typography.labelMedium,
                         color = PrismTextMuted,
                     )
