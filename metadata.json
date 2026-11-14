@@ -1,0 +1,6 @@
+{
+  "name": "Prism",
+  "description": "Floating screen-reading overlay bubble and panel for Android",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

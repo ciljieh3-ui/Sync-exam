@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Prism</string>
+    <string name="notification_channel_name">Prism Overlay</string>
+    <string name="notification_channel_desc">Keeps the Prism floating overlay and watch-area capture active</string>
+    <string name="notification_title">Prism</string>
+    <string name="notification_text_idle">Prism ready — tap bubble to open</string>
+    <string name="notification_text_watching">Prism watching — tap to stop</string>
+    <string name="notification_action_stop">Stop</string>
+    <string name="btn_enable_overlay">Enable Overlay</string>
+    <string name="btn_start_prism">Start Prism</string>
+    <string name="btn_stop_prism">Stop Prism</string>
+    <string name="bubble_desc">Tap to open Prism panel, long press to set watch area</string>
+    <string name="close_panel_desc">Close Prism panel</string>
+    <string name="drag_handle_desc">Drag Prism panel</string>
+    <string name="selection_box_desc">Drag to move or drag corners to resize watch area</string>
+</resources>

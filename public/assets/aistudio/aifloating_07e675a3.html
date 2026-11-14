@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0e17">
+<title>Prism</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0e17;--surface:#111826;--surface-2:#161f30;--surface-3:#1e2940;
+  --border:#25314a;--border-2:#354465;
+  --text:#e6edf7;--text-2:#8a97ad;--text-3:#4d5a72;
+  --accent:#00e5a0;--accent-2:#b47eff;
+  --danger:#ff5e7e;--warn:#ffb547;
+  --radius:12px;--radius-sm:8px;--radius-lg:18px;
+  --font-ui:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --font-mono:'SF Mono','JetBrains Mono','Roboto Mono',monospace;
+}
+html,body{background:var(--bg);color:var(--text);font-family:var(--font-ui);-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;overflow:hidden;height:100%;height:100dvh}
+body{display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;font-size:14px;line-height:1.5}
+input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit}
+
+.header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--surface);cursor:move}
+.brand{display:flex;align-items:center;gap:10px;pointer-events:none}
+.mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px rgba(0,229,160,.4)}
+.mark svg{width:14px;height:14px;stroke:#0a0e17;fill:none;stroke-width:2.4}
+.title{font-size:15px;font-weight:600;letter-spacing:-.02em}
+.sub{font-size:10px;color:var(--text-2);font-family:var(--font-mono);margin-top:1px}
+.hbtn{width:32px;height:32px;border-radius:var(--radius-sm);background:transparent;border:none;color:var(--text-2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.hbtn:active{background:var(--surface-2);color:var(--text)}
+.hbtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
+
+.main{flex:1;overflow-y:auto;padding:14px;-webkit-overflow-scrolling:touch}
+.main::-webkit-scrollbar{width:0}
+
+/* Watch control card */
+.watch-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+.watch-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.watch-title{font-size:13px;font-weight:600}
+.watch-state{font-size:10px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.06em;padding:3px 8px;border-radius:5px;background:var(--surface-3);color:var(--text-2)}
+.watch-state.on{background:rgba(0,229,160,.12);color:var(--accent)}
+.watch-state.off{background:var(--surface-3);color:var(--text-2)}
+.box-info{font-size:11px;color:var(--text-2);font-family:var(--font-mono);margin-bottom:12px;line-height:1.5}
+.box-info b{color:var(--text);font-weight:600}
+
+.btn-row{display:flex;gap:8px;margin-bottom:8px}
+.btn-row:last-child{margin-bottom:0}
+.btn{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:11px;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;background:var(--surface-2);color:var(--text);border:1px solid var(--border)}
+.btn:active{transform:scale(.98)}
+.btn:disabled{opacity:.4;pointer-events:none}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#0a0e17;border:none}
+.btn.danger{color:var(--danger);border-color:rgba(255,94,126,.3)}
+
+/* Answer display */
+.answer-card{background:linear-gradient(135deg,rgba(0,229,160,.06),rgba(180,126,255,.06));border:1px solid rgba(0,229,160,.25);border-radius:var(--radius);padding:16px;margin-bottom:14px;display:none;animation:pop .35s cubic-bezier(.22,1,.36,1)}
+.answer-card.show{display:block}
+@keyframes pop{0%{opacity:0;transform:scale(.96)}100%{opacity:1;transform:scale(1)}}
+.a-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-family:var(--font-mono);margin-bottom:8px;font-weight:600}
+.a-text{font-size:20px;font-weight:600;color:var(--text);line-height:1.35;padding:14px;background:rgba(0,0,0,.25);border-left:3px solid var(--accent);border-radius:var(--radius-sm);margin-bottom:10px;cursor:pointer;word-break:break-word}
+.a-text:active{background:rgba(0,229,160,.12)}
+.q-text{font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:8px;padding-top:8px;border-top:1px solid var(--border)}
+
+.opts{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.opt{display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;line-height:1.4;color:var(--text-2);text-align:left;word-break:break-word}
+.opt:active{background:var(--surface-3)}
+.opt.correct{background:rgba(0,229,160,.1);border-color:var(--accent);color:var(--text)}
+.opt-letter{width:20px;height:20px;border-radius:5px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-family:var(--font-mono);flex-shrink:0}
+.opt.correct .opt-letter{background:var(--accent);color:#0a0e17}
+
+.meta{display:flex;gap:12px;font-size:10px;color:var(--text-3);font-family:var(--font-mono);padding-top:10px;border-top:1px solid var(--border)}
+
+/* Idle state */
+.idle{text-align:center;padding:32px 16px;color:var(--text-2)}
+.idle-icon{width:44px;height:44px;margin:0 auto 12px;stroke:var(--text-3);fill:none;stroke-width:1.5}
+.idle-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px}
+.idle-sub{font-size:11px;font-family:var(--font-mono);line-height:1.5}
+
+/* Reading indicator */
+.reading{display:none;align-items:center;justify-content:center;gap:8px;padding:12px;background:var(--surface-2);border-radius:var(--radius-sm);font-size:12px;color:var(--text-2);margin-bottom:12px;font-family:var(--font-mono)}
+.reading.show{display:flex}
+.spinner{width:12px;height:12px;border:2px solid var(--border-2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Settings sheet */
+.sheet{position:absolute;inset:0;background:var(--surface);transform:translateY(100%);transition:transform .3s cubic-bezier(.22,1,.36,1);display:flex;flex-direction:column;z-index:10}
+.sheet.open{transform:translateY(0)}
+.sheet-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.sheet-title{font-size:15px;font-weight:600}
+.sheet-body{flex:1;overflow-y:auto;padding:16px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-2);font-family:var(--font-mono);margin-bottom:6px;font-weight:500}
+.input,.select{width:100%;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);outline:none;-webkit-user-select:text;user-select:text}
+.input:focus,.select:focus{border-color:var(--accent)}
+.input::placeholder{color:var(--text-3)}
+.hint{font-size:11px;color:var(--text-3);line-height:1.5;margin-top:6px}
+.btn-secondary{background:var(--surface-2);color:var(--text);border:1px solid var(--border);width:100%;padding:11px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;margin-bottom:8px}
+
+.toast{position:absolute;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface-3);border:1px solid var(--border-2);padding:10px 16px;border-radius:var(--radius);font-size:12px;font-weight:500;box-shadow:0 12px 32px rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:all .25s;z-index:20;max-width:calc(100% - 32px);text-align:center}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.ok{border-color:rgba(0,229,160,.4);color:var(--accent)}
+.toast.err{border-color:rgba(255,94,126,.4);color:var(--danger)}
+
+.hidden{display:none !important}
+</style>
+</head>
+<body>
+
+<header class="header" id="dragHandle">
+  <div class="brand">
+    <div class="mark"><svg viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
+    <div>
+      <div class="title">Prism</div>
+      <div class="sub" id="modelLabel">gemini-2.5-flash</div>
+    </div>
+  </div>
+  <button class="hbtn" id="openSettings" aria-label="Settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
+</header>
+
+<main class="main">
+  <div class="watch-card">
+    <div class="watch-head">
+      <div class="watch-title">Watch Area</div>
+      <div class="watch-state off" id="watchState">OFF</div>
+    </div>
+    <div class="box-info" id="boxInfo">Kotak belum diatur. Tap <b>Set Area</b> untuk pasang kotak pilih di layar.</div>
+    <div class="btn-row">
+      <button class="btn" id="setAreaBtn">Set Area</button>
+      <button class="btn" id="lockAreaBtn" disabled>Lock</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" id="watchBtn" disabled>Start Watching</button>
+    </div>
+  </div>
+
+  <div class="reading" id="reading"><div class="spinner"></div><span>Membaca area…</span></div>
+
+  <div class="answer-card" id="answerCard">
+    <div class="a-label">Answer</div>
+    <div class="a-text" id="aText">—</div>
+    <div class="q-text" id="qText"></div>
+    <div class="opts" id="opts"></div>
+    <div class="meta" id="meta"></div>
+  </div>
+
+  <div class="idle" id="idle">
+    <svg class="idle-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+    <div class="idle-title">Siap memantau</div>
+    <div class="idle-sub">Pasang kotak di area soal, lalu Start Watching.<br>Jawaban akan muncul otomatis saat soal baru terdeteksi.</div>
+  </div>
+</main>
+
+<div class="sheet" id="settingsSheet">
+  <div class="sheet-header">
+    <div class="sheet-title">Settings</div>
+    <button class="hbtn" id="closeSettings" aria-label="Close">
+      <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body">
+    <div class="field">
+      <label>Gemini API Key</label>
+      <input type="password" class="input" id="apiKey" placeholder="AIza…" autocomplete="off" spellcheck="false">
+      <div class="hint">Gratis di aistudio.google.com/apikey</div>
+    </div>
+    <div class="field">
+      <label>Model</label>
+      <select class="select" id="model">
+        <option value="gemini-2.5-flash">gemini-2.5-flash (recommended)</option>
+        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (faster, cheaper)</option>
+        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Bahasa jawaban</label>
+      <select class="select" id="lang">
+        <option value="auto">Auto (ikuti soal)</option>
+        <option value="id">Bahasa Indonesia</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Frame sensitivitas (0.01 = sangat sensitif, 0.15 = stabil)</label>
+      <input type="number" class="input" id="sensitivity" min="0.01" max="0.3" step="0.01" value="0.05">
+      <div class="hint">Seberapa banyak perubahan piksel sebelum dianggap "soal baru". Naikkan kalau sering re-trigger tanpa soal berubah.</div>
+    </div>
+    <button class="btn primary" id="saveSettings" style="margin-bottom:8px;width:100%;padding:11px;border:none;border-radius:var(--radius-sm);font-weight:600;cursor:pointer;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#0a0e17">Save</button>
+    <button class="btn-secondary" id="clearHistory">Clear history</button>
+    <button class="btn-secondary" id="clearAll" style="color:var(--danger);border-color:rgba(255,94,126,.3)">Reset all data</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const STORE = 'prism_v2';
+  const defaults = {
+    apiKey: '',
+    model: 'gemini-2.5-flash',
+    lang: 'auto',
+    sensitivity: 0.05,
+    box: null, // {x,y,w,h} from Kotlin
+  };
+
+  let state = loadState();
+  let watchActive = false;
+  let busy = false;
+  let lastQuestionHash = '';
+  let lastFrameAt = 0;
+  let pendingFrame = null;
+  let toastTimer = null;
+  let boxLocked = false;
+
+  const $ = id => document.getElementById(id);
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORE);
+      return raw ? { ...defaults, ...JSON.parse(raw) } : { ...defaults };
+    } catch { return { ...defaults }; }
+  }
+  function saveState() {
+    try { localStorage.setItem(STORE, JSON.stringify(state)); } catch {}
+  }
+
+  function showToast(msg, kind) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.className = 'toast show ' + (kind || '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  function setReading(on) {
+    $('reading').classList.toggle('show', on);
+  }
+
+  function updateBoxUI() {
+    const info = $('boxInfo');
+    const watchBtn = $('watchBtn');
+    const lockBtn = $('lockAreaBtn');
+
+    if (state.box) {
+      const { x, y, w, h } = state.box;
+      info.innerHTML = `Area aktif: <b>${w}×${h}</b> px @ (${x}, ${y})`;
+      watchBtn.disabled = false;
+      lockBtn.disabled = false;
+      lockBtn.textContent = boxLocked ? 'Unlock' : 'Lock';
+    } else {
+      info.innerHTML = 'Kotak belum diatur. Tap <b>Set Area</b> untuk pasang kotak pilih di layar.';
+      watchBtn.disabled = true;
+      lockBtn.disabled = true;
+    }
+  }
+
+  // ---- Bridge: HTML -> Kotlin ----
+  function setSelectionMode() {
+    if (!window.AndroidBridge) {
+      showToast('Native bridge tidak tersedia — pastikan app build dengan benar', 'err');
+      return;
+    }
+    try {
+      window.AndroidBridge.showSelectionBox();
+      showToast('Atur kotak di layar, lalu tap Lock', 'ok');
+    } catch (e) {
+      showToast('Gagal membuka kotak: ' + e.message, 'err');
+    }
+  }
+
+  function lockArea() {
+    if (!window.AndroidBridge) return;
+    try {
+      boxLocked = !boxLocked;
+      if (boxLocked) {
+        window.AndroidBridge.lockSelectionBox();
+        showToast('Area terkunci', 'ok');
+      } else {
+        window.AndroidBridge.showSelectionBox();
+        showToast('Area bisa digeser lagi', 'ok');
+      }
+      updateBoxUI();
+    } catch (e) {
+      showToast('Gagal: ' + e.message, 'err');
+    }
+  }
+
+  function startWatch() {
+    if (!state.apiKey) {
+      showToast('API key belum diset', 'err');
+      openSettings();
+      return;
+    }
+    if (!window.AndroidBridge) {
+      showToast('Native bridge tidak tersedia', 'err');
+      return;
+    }
+    if (!state.box) {
+      showToast('Set area dulu', 'err');
+      return;
+    }
+    try {
+      watchActive = true;
+      lastQuestionHash = '';
+      window.AndroidBridge.startWatching();
+      $('watchState').textContent = 'ON';
+      $('watchState').className = 'watch-state on';
+      $('watchBtn').textContent = 'Stop Watching';
+      $('watchBtn').classList.remove('primary');
+      $('watchBtn').classList.add('danger');
+      $('idle').classList.add('hidden');
+      showToast('Memantau area…', 'ok');
+    } catch (e) {
+      watchActive = false;
+      showToast('Gagal: ' + e.message, 'err');
+    }
+  }
+
+  function stopWatch() {
+    if (window.AndroidBridge) {
+      try { window.AndroidBridge.stopWatching(); } catch {}
+    }
+    watchActive = false;
+    $('watchState').textContent = 'OFF';
+    $('watchState').className = 'watch-state off';
+    $('watchBtn').textContent = 'Start Watching';
+    $('watchBtn').classList.add('primary');
+    $('watchBtn').classList.remove('danger');
+    $('idle').classList.remove('hidden');
+    $('answerCard').classList.remove('show');
+    setReading(false);
+  }
+
+  // ---- Bridge: Kotlin -> HTML ----
+  window.onBoxChanged = function(json) {
+    try {
+      const box = typeof json === 'string' ? JSON.parse(json) : json;
+      state.box = box;
+      saveState();
+      updateBoxUI();
+    } catch {}
+  };
+
+  window.onFrame = function(base64) {
+    // Called by Kotlin when content inside the box changes meaningfully
+    if (!watchActive) return;
+    if (busy) { pendingFrame = base64; return; }
+    processFrame(base64);
+  };
+
+  window.onWatchStopped = function() {
+    if (watchActive) {
+      watchActive = false;
+      $('watchState').textContent = 'OFF';
+      $('watchState').className = 'watch-state off';
+      $('watchBtn').textContent = 'Start Watching';
+      $('watchBtn').classList.add('primary');
+      $('watchBtn').classList.remove('danger');
+    }
+  };
+
+  // ---- AI ----
+  async function processFrame(base64) {
+    if (busy) { pendingFrame = base64; return; }
+    busy = true;
+    setReading(true);
+
+    try {
+      const dataUrl = base64.startsWith('data:')
+        ? base64
+        : 'data:image/png;base64,' + base64;
+
+      // Cheap local pre-check: skip if same as last frame
+      const frameHash = simpleHash(base64);
+      if (frameHash === lastFrameAt) {
+        busy = false;
+        setReading(false);
+        return;
+      }
+      lastFrameAt = frameHash;
+
+      const result = await callGemini(dataUrl);
+      if (result && result.question) {
+        const qHash = simpleHash(result.question + '|' + (result.answer || ''));
+        if (qHash !== lastQuestionHash) {
+          lastQuestionHash = qHash;
+          renderResult(result);
+        }
+      }
+    } catch (err) {
+      console.warn('AI error:', err.message);
+    } finally {
+      busy = false;
+      setReading(false);
+      if (pendingFrame) {
+        const f = pendingFrame;
+        pendingFrame = null;
+        setTimeout(() => processFrame(f), 100);
+      }
+    }
+  }
+
+  async function callGemini(dataUrl) {
+    const base64 = dataUrl.split(',')[1];
+    const mime = (dataUrl.match(/^data:(image\/[a-z]+);/) || [, 'image/png'])[1];
+
+    const langInstruction = state.lang === 'auto'
+      ? 'Answer in the same language as the question.'
+      : state.lang === 'id' ? 'Jawab dalam Bahasa Indonesia.' : 'Answer in English.';
+
+    const prompt = `You are a live quiz answer engine. This image is a cropped region of a quiz screen.
+
+Extract the question and its options. Then determine the correct answer.
+
+Rules:
+- If the image contains no clear question (e.g. waiting screen, instructions), return empty strings.
+- If the question is cut off or unclear, set confidence low.
+- For multiple choice, pick exactly one option.
+- For fill-in-the-blank, provide the exact text.
+- ${langInstruction}
+
+Respond ONLY with valid JSON matching the schema.`;
+
+    const body = {
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mime, data: base64 } }
+        ]
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        response_mime_type: 'application/json',
+        response_schema: {
+          type: 'OBJECT',
+          properties: {
+            question: { type: 'STRING' },
+            options: { type: 'ARRAY', items: { type: 'STRING' } },
+            answer: { type: 'STRING' },
+            answerIndex: { type: 'INTEGER' },
+            confidence: { type: 'NUMBER' }
+          },
+          required: ['question', 'answer']
+        }
+      }
+    };
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${state.model}:generateContent?key=${encodeURIComponent(state.apiKey)}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      let msg = 'HTTP ' + res.status;
+      try { const j = JSON.parse(errText); msg = j.error?.message || msg; } catch {}
+      throw new Error(msg);
+    }
+
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error('Empty AI response');
+    return JSON.parse(text);
+  }
+
+  function renderResult(data) {
+    const { question, options = [], answer, answerIndex, confidence = 0.8 } = data;
+
+    if (!question && !answer) {
+      $('answerCard').classList.remove('show');
+      return;
+    }
+
+    $('aText').textContent = answer || '(tidak yakin)';
+    $('qText').textContent = question || '';
+
+    const opts = $('opts');
+    opts.innerHTML = '';
+    const letters = 'ABCDEFGHIJ';
+
+    if (Array.isArray(options) && options.length > 0) {
+      options.forEach((opt, i) => {
+        const isCorrect =
+          (typeof answerIndex === 'number' && answerIndex === i) ||
+          opt.trim().toLowerCase() === String(answer).trim().toLowerCase();
+
+        const btn = document.createElement('button');
+        btn.className = 'opt' + (isCorrect ? ' correct' : '');
+        btn.innerHTML = `<span class="opt-letter">${letters[i] || i}</span><span>${escapeHtml(opt)}</span>`;
+        btn.addEventListener('click', () => copyAnswer(opt));
+        opts.appendChild(btn);
+      });
+      opts.style.display = '';
+    } else {
+      opts.style.display = 'none';
+    }
+
+    const conf = typeof confidence === 'number' ? confidence : 0.8;
+    const confLabel = conf >= 0.85 ? 'high' : conf >= 0.6 ? 'medium' : 'low';
+    const confColor = conf >= 0.85 ? 'var(--accent)' : conf >= 0.6 ? 'var(--warn)' : 'var(--danger)';
+    $('meta').innerHTML = `<span style="color:${confColor}">● ${confLabel}</span><span>${state.model}</span><span>${new Date().toLocaleTimeString()}</span>`;
+
+    $('answerCard').classList.add('show');
+    $('idle').classList.add('hidden');
+
+    // Subtle pulse on the bubble
+    try {
+      if (window.AndroidBridge?.pulseBubble) window.AndroidBridge.pulseBubble();
+    } catch {}
+  }
+
+  function copyAnswer(text) {
+    if (!text) return;
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('Copied', 'ok');
+      } catch { showToast('Copy gagal', 'err'); }
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => showToast('Copied', 'ok'), fallback);
+    } else fallback();
+  }
+
+  $('aText').addEventListener('click', () => copyAnswer($('aText').textContent));
+
+  function simpleHash(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(36);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+
+  // ---- UI wiring ----
+  $('setAreaBtn').addEventListener('click', setSelectionMode);
+  $('lockAreaBtn').addEventListener('click', lockArea);
+  $('watchBtn').addEventListener('click', () => {
+    if (watchActive) stopWatch(); else startWatch();
+  });
+
+  // Settings
+  function openSettings() {
+    $('apiKey').value = state.apiKey;
+    $('model').value = state.model;
+    $('lang').value = state.lang;
+    $('sensitivity').value = state.sensitivity;
+    $('settingsSheet').classList.add('open');
+  }
+  function closeSettings() {
+    $('settingsSheet').classList.remove('open');
+  }
+
+  $('openSettings').addEventListener('click', openSettings);
+  $('closeSettings').addEventListener('click', closeSettings);
+
+  $('saveSettings').addEventListener('click', () => {
+    state.apiKey = $('apiKey').value.trim();
+    state.model = $('model').value;
+    state.lang = $('lang').value;
+    state.sensitivity = parseFloat($('sensitivity').value) || 0.05;
+    saveState();
+    $('modelLabel').textContent = state.model;
+    if (window.AndroidBridge?.setSensitivity) {
+      try { window.AndroidBridge.setSensitivity(state.sensitivity); } catch {}
+    }
+    closeSettings();
+    showToast('Saved', 'ok');
+  });
+
+  $('clearHistory').addEventListener('click', () => {
+    lastQuestionHash = '';
+    $('answerCard').classList.remove('show');
+    $('idle').classList.remove('hidden');
+    showToast('Cleared', 'ok');
+  });
+
+  $('clearAll').addEventListener('click', () => {
+    if (!confirm('Hapus semua data termasuk API key?')) return;
+    localStorage.removeItem(STORE);
+    state = { ...defaults };
+    $('apiKey').value = '';
+    $('modelLabel').textContent = defaults.model;
+    closeSettings();
+    showToast('Reset', 'ok');
+  });
+
+  // Drag handle
+  $('dragHandle').addEventListener('mousedown', e => {
+    if (e.target.closest('button')) return;
+    if (window.AndroidBridge?.startDrag) {
+      try { window.AndroidBridge.startDrag(); } catch {}
+    }
+  });
+
+  // Init
+  $('modelLabel').textContent = state.model;
+  updateBoxUI();
+
+  // Ask native for current box if already set
+  setTimeout(() => {
+    if (window.AndroidBridge?.getBoxBounds) {
+      try {
+        const box = window.AndroidBridge.getBoxBounds();
+        if (box) window.onBoxChanged(box);
+      } catch {}
+    }
+    if (window.AndroidBridge?.setSensitivity) {
+      try { window.AndroidBridge.setSensitivity(state.sensitivity); } catch {}
+    }
+  }, 500);
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0e17">
+<title>Prism</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0e17;--surface:#111826;--surface-2:#161f30;--surface-3:#1e2940;
+  --border:#25314a;--border-2:#354465;
+  --text:#e6edf7;--text-2:#8a97ad;--text-3:#4d5a72;
+  --accent:#00e5a0;--accent-2:#b47eff;
+  --danger:#ff5e7e;--warn:#ffb547;
+  --radius:12px;--radius-sm:8px;--radius-lg:18px;
+  --font-ui:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --font-mono:'SF Mono','JetBrains Mono','Roboto Mono',monospace;
+}
+html,body{background:var(--bg);color:var(--text);font-family:var(--font-ui);-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;overflow:hidden;height:100%;height:100dvh}
+body{display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;font-size:14px;line-height:1.5}
+input,textarea,button,select{font-family:inherit;font-size:inherit;color:inherit}
+
+/* Header */
+.header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--surface);-webkit-app-region:drag;cursor:move}
+.brand{display:flex;align-items:center;gap:10px;pointer-events:none}
+.mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px rgba(0,229,160,.4)}
+.mark svg{width:14px;height:14px;stroke:#0a0e17;fill:none;stroke-width:2.4}
+.title{font-size:15px;font-weight:600;letter-spacing:-.02em}
+.sub{font-size:10px;color:var(--text-2);font-family:var(--font-mono);margin-top:1px;letter-spacing:.03em}
+.hbtn{width:32px;height:32px;border-radius:var(--radius-sm);background:transparent;border:none;color:var(--text-2);cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-app-region:no-drag;transition:all .15s}
+.hbtn:active{background:var(--surface-2);color:var(--text)}
+.hbtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
+
+/* Main scroll area */
+.main{flex:1;overflow-y:auto;padding:14px;-webkit-overflow-scrolling:touch}
+.main::-webkit-scrollbar{width:0}
+
+/* Capture zone */
+.capture{border:2px dashed var(--border-2);border-radius:var(--radius);padding:28px 16px;text-align:center;cursor:pointer;background:var(--surface);transition:all .2s;margin-bottom:14px}
+.capture:active{transform:scale(.98);border-color:var(--accent);background:rgba(0,229,160,.04)}
+.capture.busy{border-color:var(--accent);background:rgba(0,229,160,.06);cursor:wait}
+.cap-icon{width:38px;height:38px;margin:0 auto 10px;stroke:var(--text-2);fill:none;stroke-width:1.6;transition:stroke .2s}
+.capture:active .cap-icon,.capture.busy .cap-icon{stroke:var(--accent)}
+.cap-title{font-size:14px;font-weight:600;margin-bottom:3px}
+.cap-sub{font-size:11px;color:var(--text-2);font-family:var(--font-mono)}
+
+/* Status */
+.status{display:none;align-items:center;gap:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--radius-sm);font-size:12px;color:var(--text-2);margin-bottom:12px}
+.status.show{display:flex}
+.status.error{color:var(--danger)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 1.4s ease-in-out infinite;flex-shrink:0}
+.status.error .dot{background:var(--danger);animation:none}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+
+/* Result card */
+.result{display:none;animation:slideIn .3s cubic-bezier(.22,1,.36,1)}
+.result.show{display:block}
+@keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+.q-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-family:var(--font-mono);margin-bottom:6px}
+.q-text{font-size:13px;color:var(--text-2);line-height:1.5;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+
+.a-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-family:var(--font-mono);margin-bottom:6px;font-weight:600}
+.a-text{font-size:17px;font-weight:600;color:var(--text);line-height:1.35;padding:14px;background:linear-gradient(135deg,rgba(0,229,160,.08),rgba(180,126,255,.08));border-left:3px solid var(--accent);border-radius:var(--radius-sm);margin-bottom:14px;cursor:pointer;position:relative;transition:all .15s;word-break:break-word}
+.a-text:active{transform:scale(.98);background:linear-gradient(135deg,rgba(0,229,160,.16),rgba(180,126,255,.16))}
+.a-copy{position:absolute;top:8px;right:10px;font-size:9px;color:var(--text-3);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.05em}
+
+.opts-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-family:var(--font-mono);margin-bottom:8px}
+.opts{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.opt{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;transition:all .15s;text-align:left;font-size:13px;line-height:1.4;color:var(--text-2);word-break:break-word}
+.opt:active{transform:scale(.98);background:var(--surface-3);border-color:var(--accent);color:var(--text)}
+.opt.correct{background:rgba(0,229,160,.1);border-color:var(--accent);color:var(--text)}
+.opt-letter{width:22px;height:22px;border-radius:6px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text-2);font-family:var(--font-mono);flex-shrink:0}
+.opt.correct .opt-letter{background:var(--accent);color:#0a0e17}
+
+.meta{display:flex;gap:12px;font-size:10px;color:var(--text-3);font-family:var(--font-mono);padding-top:10px;border-top:1px solid var(--border)}
+.meta span{display:flex;align-items:center;gap:4px}
+
+/* Preview image */
+.preview{display:none;margin-bottom:12px;border-radius:var(--radius-sm);overflow:hidden;border:1px solid var(--border);position:relative}
+.preview.show{display:block}
+.preview img{display:block;width:100%;height:auto;max-height:200px;object-fit:contain;background:var(--surface-2)}
+.preview-close{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:7px;background:rgba(10,14,23,.85);border:none;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;line-height:1;backdrop-filter:blur(8px)}
+
+/* Settings slide-up */
+.sheet{position:absolute;inset:0;background:var(--surface);transform:translateY(100%);transition:transform .3s cubic-bezier(.22,1,.36,1);display:flex;flex-direction:column;z-index:10}
+.sheet.open{transform:translateY(0)}
+.sheet-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.sheet-title{font-size:15px;font-weight:600}
+.sheet-body{flex:1;overflow-y:auto;padding:16px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-2);font-family:var(--font-mono);margin-bottom:6px;font-weight:500}
+.input,.select{width:100%;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);outline:none;transition:border-color .15s;-webkit-user-select:text;user-select:text}
+.input:focus,.select:focus{border-color:var(--accent)}
+.input::placeholder{color:var(--text-3)}
+.hint{font-size:11px;color:var(--text-3);line-height:1.5;margin-top:6px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#0a0e17;border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:600;cursor:pointer;transition:all .15s}
+.btn:active{transform:scale(.98)}
+.btn:disabled{opacity:.5;pointer-events:none}
+.btn-secondary{background:var(--surface-2);color:var(--text);border:1px solid var(--border)}
+.btn-danger{background:transparent;color:var(--danger);border:1px solid rgba(255,94,126,.3)}
+
+/* Toast */
+.toast{position:absolute;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface-3);border:1px solid var(--border-2);padding:10px 16px;border-radius:var(--radius);font-size:12px;font-weight:500;box-shadow:0 12px 32px rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:all .25s cubic-bezier(.22,1,.36,1);z-index:20;max-width:calc(100% - 32px);text-align:center}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.ok{border-color:rgba(0,229,160,.4);color:var(--accent)}
+.toast.err{border-color:rgba(255,94,126,.4);color:var(--danger)}
+
+.hidden{display:none !important}
+</style>
+</head>
+<body>
+
+<header class="header" id="dragHandle">
+  <div class="brand">
+    <div class="mark"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+    <div>
+      <div class="title">Prism</div>
+      <div class="sub" id="modelLabel">gemini-2.5-flash</div>
+    </div>
+  </div>
+  <button class="hbtn" id="openSettings" aria-label="Settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
+</header>
+
+<main class="main">
+  <div class="capture" id="captureBtn">
+    <svg class="cap-icon" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    <div class="cap-title" id="capTitle">Tap to capture</div>
+    <div class="cap-sub" id="capSub">or paste / upload image</div>
+  </div>
+
+  <div class="status" id="status"><div class="dot"></div><span id="statusText"></span></div>
+
+  <div class="preview" id="preview">
+    <img id="previewImg" alt="Screenshot">
+    <button class="preview-close" id="previewClose" aria-label="Close">×</button>
+  </div>
+
+  <div class="result" id="result">
+    <div class="q-label">Question</div>
+    <div class="q-text" id="qText"></div>
+
+    <div class="a-label">Answer</div>
+    <div class="a-text" id="aText"><span class="a-copy">tap to copy</span><span id="aTextInner"></span></div>
+
+    <div class="opts-label" id="optsLabel">All options</div>
+    <div class="opts" id="opts"></div>
+
+    <div class="meta" id="meta"></div>
+  </div>
+</main>
+
+<div class="sheet" id="settingsSheet">
+  <div class="sheet-header">
+    <div class="sheet-title">Settings</div>
+    <button class="hbtn" id="closeSettings" aria-label="Close">
+      <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body">
+    <div class="field">
+      <label>Gemini API Key</label>
+      <input type="password" class="input" id="apiKey" placeholder="AIza…" autocomplete="off" spellcheck="false">
+      <div class="hint">Dapatkan gratis di aistudio.google.com/apikey. Key disimpan hanya di perangkat ini.</div>
+    </div>
+    <div class="field">
+      <label>Model</label>
+      <select class="select" id="model">
+        <option value="gemini-2.5-flash">gemini-2.5-flash (recommended)</option>
+        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (faster)</option>
+        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Bahasa jawaban</label>
+      <select class="select" id="lang">
+        <option value="auto">Auto (ikuti soal)</option>
+        <option value="id">Bahasa Indonesia</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <button class="btn" id="saveSettings" style="margin-bottom:8px">Save</button>
+    <button class="btn btn-secondary" id="clearHistory" style="margin-bottom:8px">Clear history</button>
+    <button class="btn btn-danger" id="clearAll">Reset all data</button>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept="image/*" class="hidden">
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const STORE = 'prism_v1';
+  const HISTORY = 'prism_history_v1';
+
+  const defaults = {
+    apiKey: '',
+    model: 'gemini-2.5-flash',
+    lang: 'auto',
+  };
+
+  let state = loadState();
+  let currentImage = null;
+  let toastTimer = null;
+  let busy = false;
+
+  const $ = id => document.getElementById(id);
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORE);
+      return raw ? { ...defaults, ...JSON.parse(raw) } : { ...defaults };
+    } catch { return { ...defaults }; }
+  }
+  function saveState() {
+    try { localStorage.setItem(STORE, JSON.stringify(state)); } catch {}
+  }
+
+  function showToast(msg, kind) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.className = 'toast show ' + (kind || '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  function setStatus(msg, isError) {
+    const s = $('status');
+    $('statusText').textContent = msg;
+    s.classList.toggle('error', !!isError);
+    s.classList.add('show');
+  }
+  function hideStatus() {
+    $('status').classList.remove('show');
+  }
+
+  function setBusy(on) {
+    busy = on;
+    const c = $('captureBtn');
+    c.classList.toggle('busy', on);
+    $('capTitle').textContent = on ? 'Reading…' : 'Tap to capture';
+    $('capSub').textContent = on ? 'AI is looking at your screen' : 'or paste / upload image';
+  }
+
+  function pickImage() {
+    $('fileInput').click();
+  }
+
+  $('captureBtn').addEventListener('click', () => {
+    if (busy) return;
+    // Prefer native bridge if present (Kotlin WebView overlay)
+    if (window.AndroidBridge && typeof window.AndroidBridge.captureScreen === 'function') {
+      setBusy(true);
+      setStatus('Capturing screen…', false);
+      try {
+        window.AndroidBridge.captureScreen();
+      } catch (e) {
+        setBusy(false);
+        setStatus('Capture failed: ' + e.message, true);
+      }
+    } else {
+      // Fallback: file picker
+      pickImage();
+    }
+  });
+
+  $('fileInput').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) handleFile(f);
+    e.target.value = '';
+  });
+
+  document.addEventListener('paste', e => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const f = item.getAsFile();
+        if (f) { handleFile(f); break; }
+      }
+    }
+  });
+
+  function handleFile(file) {
+    if (!file.type.startsWith('image/')) {
+      showToast('Only images supported', 'err');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      showToast('Image too large (>8MB)', 'err');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      processImage(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // Called by Kotlin when MediaProjection capture completes
+  window.receiveImage = function(base64OrDataUrl) {
+    let dataUrl = base64OrDataUrl;
+    if (!dataUrl.startsWith('data:')) {
+      dataUrl = 'data:image/png;base64,' + dataUrl;
+    }
+    setBusy(false);
+    processImage(dataUrl);
+  };
+
+  // Called by Kotlin when user cancels capture permission
+  window.captureCancelled = function() {
+    setBusy(false);
+    hideStatus();
+    showToast('Capture cancelled', 'err');
+  };
+
+  window.captureFailed = function(msg) {
+    setBusy(false);
+    setStatus('Capture failed: ' + (msg || 'unknown error'), true);
+  };
+
+  async function processImage(dataUrl) {
+    currentImage = dataUrl;
+    $('previewImg').src = dataUrl;
+    $('preview').classList.add('show');
+    $('result').classList.remove('show');
+
+    if (!state.apiKey) {
+      setStatus('API key belum diset — tap ikon settings', true);
+      openSettings();
+      return;
+    }
+
+    setBusy(true);
+    setStatus('Menunggu jawaban dari AI…', false);
+
+    try {
+      const base64 = dataUrl.split(',')[1];
+      const mime = (dataUrl.match(/^data:(image\/[a-z]+);/) || [, 'image/jpeg'])[1];
+      const result = await callGemini(base64, mime);
+      renderResult(result, dataUrl);
+      hideStatus();
+      saveHistory(result);
+    } catch (err) {
+      setStatus('AI error: ' + err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function callGemini(base64, mime) {
+    const langInstruction = state.lang === 'auto'
+      ? 'Answer in the same language as the question.'
+      : state.lang === 'id'
+        ? 'Jawab dalam Bahasa Indonesia.'
+        : 'Answer in English.';
+
+    const prompt = `You are an exam answer engine. Look at this image carefully.
+
+The image contains a multiple-choice question, a fill-in-the-blank question, or a quiz.
+
+Tasks:
+1. Extract the question text EXACTLY as it appears.
+2. Extract ALL answer options exactly as written (if any).
+3. Determine the correct answer. If it's multiple choice, pick one of the options. If it's fill-in-the-blank, provide the exact text.
+4. ${langInstruction}
+
+If the image is unclear or contains no question, set question to "[no question detected]" and answer to "[unclear]" and confidence to 0.
+
+Be precise. Do not guess if confidence is low — report what you can see.`;
+
+    const body = {
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mime, data: base64 } }
+        ]
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        response_mime_type: 'application/json',
+        response_schema: {
+          type: 'OBJECT',
+          properties: {
+            question: { type: 'STRING', description: 'The question text as it appears in the image' },
+            options: { type: 'ARRAY', items: { type: 'STRING' }, description: 'All answer options, empty array if none' },
+            answer: { type: 'STRING', description: 'The correct answer text' },
+            answerIndex: { type: 'INTEGER', description: 'Index of correct option (0-based), -1 if not multiple choice' },
+            confidence: { type: 'NUMBER', description: 'Confidence 0-1' }
+          },
+          required: ['question', 'answer']
+        }
+      }
+    };
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${state.model}:generateContent?key=${encodeURIComponent(state.apiKey)}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      let msg = 'HTTP ' + res.status;
+      try { const j = JSON.parse(errText); msg = j.error?.message || msg; } catch {}
+      throw new Error(msg);
+    }
+
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error('Empty AI response');
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error('AI returned invalid JSON');
+    }
+  }
+
+  function renderResult(data, imageDataUrl) {
+    const { question, options = [], answer, answerIndex, confidence = 0.8 } = data;
+
+    $('qText').textContent = question || '(tidak ada soal terdeteksi)';
+    $('aTextInner').textContent = answer || '(tidak yakin)';
+
+    const opts = $('opts');
+    opts.innerHTML = '';
+    const letters = 'ABCDEFGHIJ';
+    let correctIdx = -1;
+
+    if (Array.isArray(options) && options.length > 0) {
+      options.forEach((opt, i) => {
+        const isCorrect =
+          (typeof answerIndex === 'number' && answerIndex === i) ||
+          opt.trim().toLowerCase() === String(answer).trim().toLowerCase();
+        if (isCorrect) correctIdx = i;
+
+        const btn = document.createElement('button');
+        btn.className = 'opt' + (isCorrect ? ' correct' : '');
+        btn.innerHTML = `<span class="opt-letter">${letters[i] || i}</span><span>${escapeHtml(opt)}</span>`;
+        btn.addEventListener('click', () => copyAnswer(opt));
+        opts.appendChild(btn);
+      });
+      $('optsLabel').style.display = '';
+      opts.style.display = '';
+    } else {
+      $('optsLabel').style.display = 'none';
+      opts.style.display = 'none';
+    }
+
+    const conf = typeof confidence === 'number' ? confidence : 0.8;
+    const confLabel = conf >= 0.85 ? 'high' : conf >= 0.6 ? 'medium' : 'low';
+    const confColor = conf >= 0.85 ? 'var(--accent)' : conf >= 0.6 ? 'var(--warn)' : 'var(--danger)';
+
+    $('meta').innerHTML = `
+      <span style="color:${confColor}">● confidence ${confLabel}</span>
+      <span>${state.model}</span>
+    `;
+
+    $('result').classList.add('show');
+  }
+
+  function copyAnswer(text) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => showToast('Copied: ' + truncate(text, 30), 'ok'),
+        () => fallbackCopy(text)
+      );
+    } else {
+      fallbackCopy(text);
+    }
+  }
+
+  function fallbackCopy(text) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('Copied', 'ok');
+    } catch {
+      showToast('Copy failed', 'err');
+    }
+  }
+
+  $('aText').addEventListener('click', () => copyAnswer($('aTextInner').textContent));
+
+  $('previewClose').addEventListener('click', () => {
+    $('preview').classList.remove('show');
+    currentImage = null;
+  });
+
+  function saveHistory(result) {
+    try {
+      const raw = localStorage.getItem(HISTORY);
+      const list = raw ? JSON.parse(raw) : [];
+      list.unshift({ ...result, ts: Date.now() });
+      localStorage.setItem(HISTORY, JSON.stringify(list.slice(0, 50)));
+    } catch {}
+  }
+
+  // Settings
+  function openSettings() {
+    $('apiKey').value = state.apiKey;
+    $('model').value = state.model;
+    $('lang').value = state.lang;
+    $('settingsSheet').classList.add('open');
+  }
+  function closeSettings() {
+    $('settingsSheet').classList.remove('open');
+  }
+
+  $('openSettings').addEventListener('click', openSettings);
+  $('closeSettings').addEventListener('click', closeSettings);
+
+  $('saveSettings').addEventListener('click', () => {
+    state.apiKey = $('apiKey').value.trim();
+    state.model = $('model').value;
+    state.lang = $('lang').value;
+    saveState();
+    $('modelLabel').textContent = state.model;
+    closeSettings();
+    showToast('Saved', 'ok');
+  });
+
+  $('clearHistory').addEventListener('click', () => {
+    try { localStorage.removeItem(HISTORY); } catch {}
+    showToast('History cleared', 'ok');
+  });
+
+  $('clearAll').addEventListener('click', () => {
+    if (!confirm('Hapus semua data termasuk API key?')) return;
+    localStorage.removeItem(STORE);
+    localStorage.removeItem(HISTORY);
+    state = { ...defaults };
+    $('apiKey').value = '';
+    $('modelLabel').textContent = defaults.model;
+    closeSettings();
+    showToast('Reset complete', 'ok');
+  });
+
+  // Drag handle: tell native layer via bridge (Kotlin listens)
+  const dragHandle = $('dragHandle');
+  let dragStart = null;
+  dragHandle.addEventListener('mousedown', e => {
+    if (e.target.closest('button')) return;
+    if (window.AndroidBridge && typeof window.AndroidBridge.startDrag === 'function') {
+      try { window.AndroidBridge.startDrag(); } catch {}
+    }
+  });
+
+  // Prevent accidental scroll-to-refresh inside WebView
+  document.addEventListener('touchmove', e => {
+    if (e.target.closest('.main, .sheet-body')) return;
+    e.preventDefault();
+  }, { passive: false });
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+  function truncate(s, n) {
+    s = String(s);
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  }
+
+  // Init
+  $('modelLabel').textContent = state.model;
+  if (!state.apiKey) {
+    setTimeout(() => {
+      setStatus('API key belum diset — tap ikon settings di kanan atas', true);
+    }, 400);
+  }
+})();
+</script>
+</body>
+</html>
